@@ -19,6 +19,8 @@ struct CardsApp: App {
     @State private var history = HistoryStore()
     @State private var checker = ConditionChecker()
     @State private var market = MarketStore()
+    @State private var collection = CollectionStore()
+    @State private var binders = BinderStore()
     @AppStorage("autoCheck") private var autoCheck = true
     @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .all
     @Environment(\.scenePhase) private var scenePhase
@@ -37,6 +39,8 @@ struct CardsApp: App {
                 .environment(history)
                 .environment(checker)
                 .environment(market)
+                .environment(collection)
+                .environment(binders)
                 .task {
                     await refreshAll()
                     #if os(macOS)
@@ -48,6 +52,15 @@ struct CardsApp: App {
                     #endif
                 }
         }
+        #if os(macOS)
+        .defaultSize(width: 1100, height: 760)
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("Prijzen verversen") { Task { await catalog.refresh() } }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+            }
+        }
+        #endif
         #if os(iOS)
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { Self.scheduleBackgroundRefresh() }
@@ -55,6 +68,13 @@ struct CardsApp: App {
         .backgroundTask(.appRefresh(Self.refreshID)) {
             await refreshPrices()
             Self.scheduleBackgroundRefresh()
+        }
+        #endif
+        #if os(macOS)
+        Settings {
+            SettingsView()
+                .environment(catalog)
+                .frame(width: 480, height: 460)
         }
         #endif
     }

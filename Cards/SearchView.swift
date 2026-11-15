@@ -11,6 +11,8 @@ struct SearchView: View {
     @State private var sort: SearchSort = .priceDesc
     @State private var expansion: Int? = nil
     @State private var onlyPriced = false
+    @State private var showSettings = false
+    @AppStorage("gridMode") private var gridMode = true
 
     private func results(from all: [CardItem]) -> [CardItem] {
         var out = all
@@ -36,8 +38,9 @@ struct SearchView: View {
         NavigationStack {
             let all = catalog.searchAll(query)
             let results = results(from: all)
-            List(results) { item in
-                NavigationLink(value: item) { CardRow(item: item) }
+            Group {
+                if gridMode { CardGrid(items: results) }
+                else { List(results) { item in NavigationLink(value: item) { CardRow(item: item) } } }
             }
             .overlay {
                 if catalog.items.isEmpty {
@@ -49,16 +52,19 @@ struct SearchView: View {
                     }
                 } else if query.isEmpty {
                     ContentUnavailableView("Zoek een kaart", systemImage: "magnifyingglass",
-                                           description: Text("\(catalog.items.count) kaarten beschikbaar"))
+                                           description: Text("\(catalog.items.count.formatted()) kaarten beschikbaar. Of blader via Sets."))
                 } else if results.isEmpty {
                     ContentUnavailableView.search(text: query)
                 }
             }
-            .searchable(text: $query, prompt: "Zoek op kaartnaam")
+            .searchable(text: $query, prompt: "Zoek op kaartnaam of set")
             .navigationTitle("Cards")
             .navigationDestination(for: CardItem.self) { DetailView(item: $0) }
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button { gridMode.toggle() } label: {
+                        Label(gridMode ? "Lijst" : "Raster", systemImage: gridMode ? "list.bullet" : "square.grid.2x2")
+                    }
                     Menu {
                         Picker("Sorteren", selection: $sort) {
                             ForEach(SearchSort.allCases) { Text($0.rawValue).tag($0) }
@@ -71,12 +77,14 @@ struct SearchView: View {
                     } label: {
                         Label("Filter", systemImage: (expansion != nil || onlyPriced) ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                     }
-                }
-                ToolbarItem(placement: .primaryAction) {
                     Button { Task { await catalog.refresh() } } label: {
                         if catalog.isLoading { ProgressView().controlSize(.small) }
                         else { Label("Ververs", systemImage: "arrow.clockwise") }
                     }
+                    .keyboardShortcut("r")
+                    #if os(iOS)
+                    Button { showSettings = true } label: { Label("Instellingen", systemImage: "gearshape") }
+                    #endif
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -85,6 +93,7 @@ struct SearchView: View {
                         .font(.caption).foregroundStyle(.secondary).padding(6)
                 }
             }
+            .sheet(isPresented: $showSettings) { SettingsView() }
         }
     }
 }

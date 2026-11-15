@@ -13,6 +13,8 @@ final class CatalogStore {
     var errorMessage: String?
     let map = CardMap.load()
     private var searchIndex: [String] = []
+    private(set) var sets: [SetInfo] = []
+    private(set) var itemsBySet: [Int: [CardItem]] = [:]
 
     func setName(for item: CardItem) -> String? { map.sets[item.expansionId] }
     func imageURL(for item: CardItem, quality: CardMap.Quality) -> URL? { map.imageURL(for: item.id, quality: quality) }
@@ -64,6 +66,11 @@ final class CatalogStore {
         items = snap.items
         byID = Dictionary(uniqueKeysWithValues: snap.items.map { ($0.id, $0) })
         lastUpdated = snap.fetchedAt
+        itemsBySet = Dictionary(grouping: snap.items, by: \.expansionId)
+        sets = itemsBySet.map { id, items in
+            SetInfo(id: id, name: map.sets[id] ?? "Set \(id)", isNamed: map.sets[id] != nil,
+                    count: items.count, logoURL: map.setLogoURL(id))
+        }.sorted { $0.id > $1.id }
         searchIndex = snap.items.map { ($0.name + " " + (map.sets[$0.expansionId] ?? "")).lowercased() }
     }
 
@@ -103,4 +110,12 @@ final class CatalogStore {
     nonisolated private static func writeCache(_ snap: Snapshot) {
         if let data = try? JSONEncoder().encode(snap) { try? data.write(to: cacheURL, options: .atomic) }
     }
+}
+
+struct SetInfo: Identifiable, Hashable {
+    let id: Int          // Cardmarket idExpansion
+    let name: String
+    let isNamed: Bool
+    let count: Int
+    let logoURL: URL?
 }

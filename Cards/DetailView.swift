@@ -7,30 +7,34 @@ struct DetailView: View {
     @Environment(WatchStore.self) private var watch
     @Environment(HistoryStore.self) private var history
     @Environment(MarketStore.self) private var market
+    @Environment(CollectionStore.self) private var collection
+    @Environment(BinderStore.self) private var binders
     @State private var showAlert = false
+    @State private var showAdd = false
+    @State private var toast: String?
 
     private var current: CardItem { catalog.byID[item.id] ?? item }
 
     var body: some View {
         List {
+            hero
             Section {
-                VStack(spacing: 6) {
-                    CardImage(item: current, quality: .high)
-                        .frame(maxHeight: 360)
-                        .shadow(radius: 6, y: 3)
-                    if let set = catalog.setName(for: current) {
-                        Text(set).font(.subheadline).foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .listRowBackground(Color.clear)
+                actions
             }
+            .listRowBackground(Color.clear)
+            .listRowInsets(.init())
+
             Section("Prijsverloop (trend)") {
                 let pts = history.points[item.id] ?? []
                 if pts.count >= 2 {
-                    Chart(pts) { LineMark(x: .value("Datum", $0.date), y: .value("EUR", $0.price)) }
-                        .chartYScale(domain: .automatic(includesZero: false))
-                        .frame(height: 140)
+                    Chart(pts) {
+                        AreaMark(x: .value("Datum", $0.date), y: .value("EUR", $0.price))
+                            .foregroundStyle(Theme.accent.opacity(0.15))
+                        LineMark(x: .value("Datum", $0.date), y: .value("EUR", $0.price))
+                            .foregroundStyle(Theme.accent)
+                    }
+                    .chartYScale(domain: .automatic(includesZero: false))
+                    .frame(height: 140)
                 } else {
                     Text("De geschiedenis wordt vanaf nu elke dag bijgehouden voor kaarten die je bekijkt of volgt.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -63,23 +67,97 @@ struct DetailView: View {
                 Section("Holo / foil") { rows(current.holo) }
             }
             Section {
-                if let e = watch.entry(item.id) {
-                    if let summary = e.alertSummary {
-                        LabeledContent("Alert", value: summary)
-                    }
-                    Button("Alert instellen…") { showAlert = true }
-                    Button("Van watchlist halen", role: .destructive) { watch.remove(item.id) }
-                } else {
-                    Button("Aan watchlist toevoegen") { watch.add(item) }
+                if let e = watch.entry(item.id), let summary = e.alertSummary {
+                    LabeledContent("Alert", value: summary)
                 }
                 NavigationLink("Aanbiedingen per staat") { ListingsView(item: current) }
                 Link("Open op Cardmarket", destination: current.cardmarketURL)
             }
         }
         .navigationTitle(item.name)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .onAppear { history.record(id: item.id, price: current.mainPrice) }
         .task { await market.fetchCrossMarket(item: item, map: catalog.map) }
         .sheet(isPresented: $showAlert) { AlertSheet(item: current) }
+        .sheet(isPresented: $showAdd) { AddToCollectionSheet(item: current) }
+        .overlay(alignment: .bottom) {
+            if let toast {
+                Text(toast).font(.footnote.weight(.medium)).padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(.regularMaterial, in: .capsule).padding(.bottom, 16)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy, value: toast)
+    }
+
+    // MARK: - Onderdelen
+
+    private var hero: some View {
+        Section {
+            VStack(spacing: 10) {
+                CardImage(item: current, quality: .high)
+                    .frame(maxHeight: 380)
+                    .shadow(color: Theme.accent.opacity(0.35), radius: 18, y: 8)
+                VStack(spacing: 2) {
+                    Text(euro(current.mainPrice)).font(.title.weight(.bold)).monospacedDigit()
+                    if let set = catalog.setName(for: current) {
+                        Text(set).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    let owned = collection.count(of: item.id)
+                    if owned > 0 {
+                        Label("\(owned)× in je collectie", systemImage: "checkmark.circle.fill")
+                            .font(.caption).foregroundStyle(.green)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .listRowBackground(
+                LinearGradient(colors: [Theme.accent.opacity(0.18), .clear], startPoint: .top, endPoint: .bottom)
+            )
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 10) {
+            actionButton("Collectie", "plus.rectangle.on.rectangle") { showAdd = true }
+            Menu {
+                if binders.binders.isEmpty { Text("Maak eerst een binder") }
+                ForEach(binders.binders) { b in
+                    Button(b.name) {
+                        toast = binders.addCard(b.id, productID: item.id) ? "Toegevoegd aan \(b.name)" : "\(b.name) is vol"
+                        hideToast()
+                    }
+                }
+            } label: { actionLabel("Binder", "books.vertical") }
+            .buttonStyle(.plain)
+            if watch.isWatching(item.id) {
+                actionButton("Alert", "bell.fill") { showAlert = true }
+            } else {
+                actionButton("Volgen", "bell") { watch.add(item); showAlert = true }
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private func actionButton(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { actionLabel(title, icon) }.buttonStyle(.plain)
+    }
+
+    private func actionLabel(_ title: String, _ icon: String) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon).font(.title3)
+            Text(title).font(.caption.weight(.medium))
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 10)
+        .background(Theme.accent.opacity(0.12), in: .rect(cornerRadius: 12))
+        .foregroundStyle(Theme.accent)
+    }
+
+    private func hideToast() {
+        Task { try? await Task.sleep(for: .seconds(2)); toast = nil }
     }
 
     @ViewBuilder
@@ -90,65 +168,5 @@ struct DetailView: View {
         LabeledContent("Gem. 1 dag", value: euro(p.avg1))
         LabeledContent("Gem. 7 dagen", value: euro(p.avg7))
         LabeledContent("Gem. 30 dagen", value: euro(p.avg30))
-    }
-}
-
-struct AlertSheet: View {
-    let item: CardItem
-    @Environment(WatchStore.self) private var watch
-    @Environment(MarketStore.self) private var market
-    @Environment(\.dismiss) private var dismiss
-    @State private var direction: AlertDirection = .below
-    @State private var condition: Condition? = nil
-    @State private var target: Double?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Picker("Staat", selection: $condition) {
-                    Text("Alle (trendprijs)").tag(Condition?.none)
-                    ForEach(Condition.filterChoices) { Text($0.rawValue + " of beter").tag(Condition?.some($0)) }
-                }
-                if condition == nil {
-                    Picker("Melden wanneer prijs", selection: $direction) {
-                        ForEach(AlertDirection.allCases) { Text($0.label).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                }
-                TextField("Prijs in EUR", value: $target, format: .number)
-                    #if os(iOS)
-                    .keyboardType(.decimalPad)
-                    #endif
-                if let sug = DealAnalyzer.suggestion(item: item, minCondition: condition, market: market), condition != nil || direction == .below {
-                    Section("Voorstel") {
-                        Button("Gebruik \(euro(sug.price))") { target = sug.price }
-                        Text(sug.basis).font(.footnote).foregroundStyle(.secondary)
-                    }
-                }
-                Section {
-                    Text("Nu (trend, alle staten): \(euro(item.mainPrice))").foregroundStyle(.secondary)
-                    if condition != nil {
-                        Text("Alerts per staat kijken naar de goedkoopste aanbieding op Cardmarket. Dat gebeurt zolang de app open staat, of als je Watchlist controleren kiest.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .navigationTitle("Prijsalert")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Annuleer") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Bewaar") {
-                        watch.setAlert(item.id, target: target, direction: direction, minCondition: condition)
-                        dismiss()
-                    }
-                }
-            }
-            .onAppear {
-                if let e = watch.entry(item.id) { direction = e.direction; target = e.target; condition = e.minCondition }
-            }
-        }
-        #if os(macOS)
-        .frame(minWidth: 380, minHeight: 280)
-        #endif
     }
 }
