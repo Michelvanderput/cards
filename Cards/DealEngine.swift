@@ -13,6 +13,30 @@ struct DealScore {
     let total: Double        // prijs + geschatte verzending
     let reference: Double?   // mediaan totaalprijs van dezelfde staat
     let factors: [Factor]
+    let advice: Advice?
+
+    /// Wat je het beste kunt doen voordat je koopt.
+    enum Advice {
+        case askPhoto       // goede deal maar geen foto: vraag er eerst een
+        case checkPhoto     // er is een foto: bekijk die vóór je koopt
+        case suspicious     // opvallend goedkoop: controleer extra goed
+
+        var label: String {
+            switch self {
+            case .askPhoto: "Vraag eerst een foto"
+            case .checkPhoto: "Check de foto"
+            case .suspicious: "Verdacht goedkoop"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .askPhoto: "camera.badge.ellipsis"
+            case .checkPhoto: "camera.viewfinder"
+            case .suspicious: "exclamationmark.triangle.fill"
+            }
+        }
+        var color: Color { self == .suspicious ? .orange : .blue }
+    }
     /// Procent onder (+) of boven (−) de referentie.
     var discount: Double? { reference.map { 1 - total / $0 } }
 }
@@ -103,8 +127,22 @@ enum DealEngine {
                 else if r > 1.15 { score -= 3; factors.append(.init(text: "Boven TCGplayer (\(euro(tcg)))", positive: false)) }
             }
 
-            let value = Int(min(100, max(0, score)).rounded())
-            out[l.id] = DealScore(value: value, level: level(for: value), shipping: ship, total: total, reference: ref, factors: factors)
+            var value = Int(min(100, max(0, score)).rounded())
+
+            // Een koopje zonder foto is onbewezen: de staat is dan niet te controleren.
+            let discount = ref.map { 1 - total / $0 }
+            if !l.hasPhoto, let d = discount, d >= 0.25, value > 79 {
+                value = 79
+                factors.append(.init(text: "Score begrensd: zonder foto kun je de staat niet controleren", positive: false))
+            }
+            var advice: DealScore.Advice?
+            if let d = discount {
+                let goodCondition = ["MT", "NM", "EX"].contains(l.condition)
+                if d >= 0.35 { advice = .suspicious }
+                else if !l.hasPhoto && d >= 0.12 && goodCondition { advice = .askPhoto }
+                else if l.hasPhoto && d >= 0.12 { advice = .checkPhoto }
+            }
+            out[l.id] = DealScore(value: value, level: level(for: value), shipping: ship, total: total, reference: ref, factors: factors, advice: advice)
         }
         return out
     }

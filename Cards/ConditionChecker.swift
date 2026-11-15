@@ -61,7 +61,8 @@ final class ConditionChecker {
                        let sc = scores[best.id], sc.value >= 80 {
                         let off = sc.discount.map { " (\(Int(($0 * 100).rounded()))% onder de markt)" } ?? ""
                         await watch.applyDeal(id: entry.id, signature: "\(best.seller)|\(best.price)|\(best.condition)",
-                                              body: "\(best.condition) voor \(euro(best.price)) uit \(best.country), dealscore \(sc.value)\(off).")
+                                              body: "\(best.condition) voor \(euro(best.price)) uit \(best.country), dealscore \(sc.value)\(off)."
+                                                + (sc.advice == .askPhoto ? " Vraag eerst een foto." : sc.advice == .checkPhoto ? " Check eerst de foto." : sc.advice == .suspicious ? " Opvallend goedkoop: controleer goed." : ""))
                     }
                 }
             }

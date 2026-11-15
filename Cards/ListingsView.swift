@@ -50,7 +50,7 @@ struct ListingsView: View {
         }
         .onDisappear { loader.stop() }
         .sheet(item: $selected) { l in
-            if let score = scores[l.id] { ListingDetailSheet(listing: l, score: score, item: item) }
+            if let score = scores[l.id] { ListingDetailSheet(listing: l, score: score, item: item, language: languageFilter) }
         }
     }
 
@@ -204,6 +204,7 @@ struct ListingRow: View {
                     if let c = Condition(rawValue: listing.condition) { ConditionBadge(condition: c) }
                     DealBadge(level: score.level)
                 }
+                if let advice = score.advice { AdviceChip(advice: advice) }
                 SellerLine(listing: listing).font(.subheadline)
                 HStack(spacing: 8) {
                     Text(listing.language).lineLimit(1)
@@ -247,6 +248,7 @@ struct DealCard: View {
                 Text(listing.language).font(.caption).lineLimit(1)
             }
             SellerLine(listing: listing).font(.caption)
+            if let advice = score.advice { AdviceChip(advice: advice) }
             if let d = score.discount, d > 0.03 {
                 Text("\(Int((d * 100).rounded()))% onder de markt").font(.caption.weight(.semibold)).foregroundStyle(.green)
             }
@@ -258,11 +260,25 @@ struct DealCard: View {
     }
 }
 
+struct AdviceChip: View {
+    let advice: DealScore.Advice
+    var body: some View {
+        Label(advice.label, systemImage: advice.icon)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(advice.color.opacity(0.14), in: .capsule)
+            .foregroundStyle(advice.color)
+    }
+}
+
 struct ListingDetailSheet: View {
     let listing: Listing
     let score: DealScore
     let item: CardItem
+    let language: LanguageFilter
     @Environment(\.dismiss) private var dismiss
+    @State private var showPhoto = false
+    @State private var showMessage = false
 
     var body: some View {
         NavigationStack {
@@ -277,9 +293,27 @@ struct ListingDetailSheet: View {
                         }
                     }
                 }
+                Section {
+                    if let advice = score.advice {
+                        Label {
+                            Text(adviceText(advice))
+                        } icon: {
+                            Image(systemName: advice.icon).foregroundStyle(advice.color)
+                        }
+                    } else {
+                        Text(listing.hasPhoto ? "Er is een foto beschikbaar." : "Geen foto. Vraag er zo nodig een als je twijfelt over de staat.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    if listing.hasPhoto {
+                        Button { showPhoto = true } label: { Label("Foto bekijken op Cardmarket", systemImage: "camera") }
+                    }
+                    Button { showMessage = true } label: { Label("Vraag de verkoper om een foto", systemImage: "text.bubble") }
+                } header: { Text("Controleer de kaart") } footer: {
+                    Text("De app verstuurt nooit berichten: je kopieert de tekst en stuurt hem zelf via Cardmarket.")
+                }
                 Section("Prijs") {
                     LabeledContent("Aanbieding", value: euro(listing.price))
-                    LabeledContent("Verzending (schatting)", value: score.shipping > 0 ? euro(score.shipping) : "niet meegeteld")
+                    LabeledContent("Verzending", value: score.shipping > 0 ? euro(score.shipping) : "niet meegeteld")
                     LabeledContent("Totaal", value: euro(score.total)).fontWeight(.semibold)
                     if let ref = score.reference { LabeledContent("Mediaan \(listing.condition) (totaal)", value: euro(ref)) }
                 }
@@ -297,10 +331,10 @@ struct ListingDetailSheet: View {
                     if let n = listing.sales { LabeledContent("Verkopen", value: n.formatted()) }
                     if let n = listing.availableItems { LabeledContent("Artikelen te koop", value: n.formatted()) }
                     if let d = listing.deliveryDays { LabeledContent("Levertijd naar jou", value: "≈ \(d) dagen") }
-                    Link(destination: item.cardmarketURL) {
-                        Label(listing.hasPhoto ? "Bekijk de foto van de verkoper op Cardmarket" : "Open de kaart op Cardmarket",
-                              systemImage: listing.hasPhoto ? "camera" : "safari")
+                    if let url = SellerMessage.profileURL(seller: listing.seller) {
+                        Link(destination: url) { Label("Profiel van de verkoper", systemImage: "person.crop.circle") }
                     }
+                    Link(destination: item.cardmarketURL) { Label("Open de kaart op Cardmarket", systemImage: "safari") }
                 }
             }
             .navigationTitle("Aanbieding")
@@ -308,9 +342,116 @@ struct ListingDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Klaar") { dismiss() } } }
+            .sheet(isPresented: $showPhoto) { PhotoCheckSheet(listing: listing, item: item, language: language) }
+            .sheet(isPresented: $showMessage) { PhotoRequestSheet(listing: listing, item: item) }
         }
         #if os(macOS)
-        .frame(minWidth: 440, minHeight: 560)
+        .frame(minWidth: 460, minHeight: 640)
         #endif
+    }
+
+    private func adviceText(_ a: DealScore.Advice) -> String {
+        switch a {
+        case .askPhoto: "Dit is een goede prijs voor de staat die de verkoper noemt, maar er is geen foto. Vraag eerst een foto voordat je koopt."
+        case .checkPhoto: "Goede prijs. Bekijk eerst de foto en let op hoeken, randen en het oppervlak."
+        case .suspicious: "Opvallend ver onder de markt. Dat kan een koopje zijn, maar controleer foto, staat en verkoper extra goed."
+        }
+    }
+}
+
+/// Toont de Cardmarket-pagina met de rij van deze verkoper gemarkeerd, zodat je de foto zelf kunt bekijken.
+struct PhotoCheckSheet: View {
+    let listing: Listing
+    let item: CardItem
+    let language: LanguageFilter
+    @Environment(\.dismiss) private var dismiss
+    @State private var loader = ListingsLoader()
+    @State private var found: Bool?
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 6) {
+                Text(message).font(.footnote).foregroundStyle(.secondary).padding(.horizontal)
+                WebViewHost(webView: loader.webView)
+            }
+            .navigationTitle("Foto bekijken")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Klaar") { dismiss() } } }
+            .task {
+                loader.load(productID: item.id, minCondition: Condition(rawValue: listing.condition), language: language)
+                while loader.isPolling { try? await Task.sleep(for: .milliseconds(500)) }
+                found = await loader.highlight(seller: listing.seller, price: listing.price)
+            }
+            .onDisappear { loader.stop() }
+        }
+        #if os(macOS)
+        .frame(minWidth: 720, minHeight: 680)
+        #endif
+    }
+
+    private var message: String {
+        switch (loader.status, found) {
+        case (.needsCheck, _): "Vink eerst de beveiligingscontrole aan."
+        case (_, nil): "Pagina laden…"
+        case (_, true?): "De rij van \(listing.seller) is gemarkeerd. Beweeg over of tik op het camera-icoontje om de foto te zien."
+        case (_, false?): "Deze aanbieding is niet meer gevonden (misschien verkocht of verlopen). Zoek \(listing.seller) op de pagina."
+        }
+    }
+}
+
+/// Bericht om de verkoper om een foto te vragen, klaar om te kopiëren.
+struct PhotoRequestSheet: View {
+    let listing: Listing
+    let item: CardItem
+    @Environment(\.dismiss) private var dismiss
+    @State private var lang: SellerMessage.Lang = .en
+    @State private var text = ""
+    @State private var copied = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Taal", selection: $lang) {
+                        Text("English").tag(SellerMessage.Lang.en)
+                        Text("Nederlands").tag(SellerMessage.Lang.nl)
+                        Text("Deutsch").tag(SellerMessage.Lang.de)
+                        Text("Français").tag(SellerMessage.Lang.fr)
+                        Text("Español").tag(SellerMessage.Lang.es)
+                        Text("Italiano").tag(SellerMessage.Lang.it)
+                    }
+                    TextEditor(text: $text).frame(minHeight: 140)
+                } header: { Text("Bericht aan \(listing.seller)") } footer: {
+                    Text("Kopieer het bericht en stuur het via het profiel van de verkoper op Cardmarket. De app verstuurt zelf niets.")
+                }
+                Section {
+                    Button {
+                        SellerMessage.copyToClipboard(text)
+                        copied = true
+                    } label: { Label(copied ? "Gekopieerd" : "Kopieer bericht", systemImage: copied ? "checkmark" : "doc.on.doc") }
+                    if let url = SellerMessage.profileURL(seller: listing.seller) {
+                        Link(destination: url) { Label("Open profiel van \(listing.seller)", systemImage: "person.crop.circle") }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Foto vragen")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Klaar") { dismiss() } } }
+            .onAppear { lang = SellerMessage.language(forCountry: listing.country); regenerate() }
+            .onChange(of: lang) { _, _ in regenerate() }
+        }
+        #if os(macOS)
+        .frame(minWidth: 460, minHeight: 460)
+        #endif
+    }
+
+    private func regenerate() {
+        text = SellerMessage.make(card: item.name, condition: listing.condition, price: listing.price, lang: lang)
+        copied = false
     }
 }

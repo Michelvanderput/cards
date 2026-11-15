@@ -85,6 +85,37 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
         isPolling = false
     }
 
+    /// Markeert de rij van een verkoper op de geladen pagina en scrolt ernaartoe, zodat je de foto
+    /// (camera-icoon) zelf kunt bekijken. Laadt zo nodig meer aanbiedingen. Geeft terug of de rij gevonden is.
+    func highlight(seller: String, price: Double) async -> Bool {
+        let js = Self.highlightJS(seller: seller, price: price)
+        for _ in 0..<6 {
+            if (try? await webView.evaluateJavaScript(js)) as? Bool == true { return true }
+            let more = (try? await webView.evaluateJavaScript(Self.loadMoreJS)) as? Bool ?? false
+            if !more { return false }
+            try? await Task.sleep(for: .seconds(1.5))
+        }
+        return false
+    }
+
+    private static func highlightJS(seller: String, price: Double) -> String {
+        let name = seller.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+        return """
+        (function(){
+          const num=s=>parseFloat(s.replace(/\\./g,'').replace(/[^\\d,]/g,'').replace(',','.'));
+          const row=[...document.querySelectorAll('.article-row')].find(r=>{
+            const n=(r.querySelector('.seller-name a')||{}).textContent;
+            const p=(r.querySelector('.price-container .color-primary')||{}).textContent||'';
+            return n&&n.trim()==='\(name)'&&Math.abs(num(p)-\(price))<0.006;});
+          if(!row) return false;
+          row.scrollIntoView({block:'center'});
+          row.style.outline='3px solid #5B4FEB'; row.style.background='rgba(91,79,235,0.10)';
+          const cam=row.querySelector('.fonticon-camera');
+          if(cam){cam.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));}
+          return true;})()
+        """
+    }
+
     private func poll(_ gen: Int) async {
         defer { if gen == generation { isPolling = false } }
         var emptyStreak = 0

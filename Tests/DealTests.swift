@@ -18,7 +18,7 @@ final class DealTests: XCTestCase {
     }
 
     func testCheapestScoresHigherThanExpensive() {
-        let items = (10...19).map { listing(Double($0)) }
+        let items = (10...19).map { listing(Double($0), photo: true) }   // met foto: een groot verschil mag een koopje zijn
         let scores = DealEngine.analyze(items, settings: settings(), tcgplayerEUR: nil, trend: nil)
         let cheap = scores[items[0].id]!, dear = scores[items[9].id]!
         XCTAssertGreaterThan(cheap.value, dear.value)
@@ -130,5 +130,60 @@ final class DealTests: XCTestCase {
         XCTAssertEqual(b.slots.count, 18)
         b.slots[0] = 1
         XCTAssertEqual(b.filled, 1)
+    }
+}
+
+@MainActor
+final class PhotoAdviceTests: XCTestCase {
+    private func settings() -> AppSettings {
+        let s = AppSettings(defaults: UserDefaults(suiteName: "cards-tests-\(UUID().uuidString)")!)
+        s.includeShipping = false   // zuivere prijsvergelijking
+        return s
+    }
+    private func listing(_ price: Double, photo: Bool, cond: String = "NM") -> Listing {
+        Listing(condition: cond, language: "English", price: price, quantity: 1, seller: "s\(price)\(photo)", country: "Netherlands",
+                sellerRating: "outstanding", sales: 1000, availableItems: nil, deliveryDays: 2, hasPhoto: photo, comment: "", flags: [])
+    }
+
+    func testBigDiscountWithoutPhotoIsCappedAndSuspicious() {
+        let base = (0..<8).map { listing(20 + Double($0) * 0.1, photo: true) }
+        let cheap = listing(11, photo: false)   // ruim 40% onder de markt
+        let sc = DealEngine.analyze(base + [cheap], settings: settings(), tcgplayerEUR: nil, trend: nil)[cheap.id]!
+        XCTAssertLessThanOrEqual(sc.value, 79)
+        XCTAssertNotEqual(sc.level, .great)
+        XCTAssertEqual(sc.advice, .suspicious)
+    }
+
+    func testBigDiscountWithPhotoCanBeKoopje() {
+        let base = (0..<8).map { listing(20 + Double($0) * 0.1, photo: true) }
+        let cheap = listing(11, photo: true)
+        let sc = DealEngine.analyze(base + [cheap], settings: settings(), tcgplayerEUR: nil, trend: nil)[cheap.id]!
+        XCTAssertGreaterThanOrEqual(sc.value, 80)
+        XCTAssertEqual(sc.level, .great)
+        XCTAssertEqual(sc.advice, .suspicious)   // ook mét foto: extra controle bij opvallend lage prijs
+    }
+
+    func testModerateDiscountAdvice() {
+        let base = (0..<8).map { listing(20 + Double($0) * 0.1, photo: true) }
+        let noPhoto = listing(17.5, photo: false)       // ≈ 17% onder de markt
+        let withPhoto = listing(17.6, photo: true)
+        let scores = DealEngine.analyze(base + [noPhoto, withPhoto], settings: settings(), tcgplayerEUR: nil, trend: nil)
+        XCTAssertEqual(scores[noPhoto.id]?.advice, .askPhoto)
+        XCTAssertEqual(scores[withPhoto.id]?.advice, .checkPhoto)
+    }
+
+    func testNoAdviceAtMarketPrice() {
+        let base = (0..<8).map { listing(20 + Double($0) * 0.1, photo: false) }
+        let scores = DealEngine.analyze(base, settings: settings(), tcgplayerEUR: nil, trend: nil)
+        XCTAssertTrue(scores.values.allSatisfy { $0.advice == nil })
+    }
+
+    func testSellerMessageLanguagesAndNoSending() {
+        XCTAssertEqual(SellerMessage.language(forCountry: "Germany"), .de)
+        XCTAssertEqual(SellerMessage.language(forCountry: "Netherlands"), .nl)
+        XCTAssertEqual(SellerMessage.language(forCountry: "Finland"), .en)
+        let text = SellerMessage.make(card: "Charizard", condition: "NM", price: 12.5, lang: .de)
+        XCTAssertTrue(text.contains("Charizard") && text.contains("NM") && text.contains("Foto"))
+        XCTAssertEqual(SellerMessage.profileURL(seller: "Jan de Vries")?.absoluteString, "https://www.cardmarket.com/en/Pokemon/Users/Jan%20de%20Vries")
     }
 }
