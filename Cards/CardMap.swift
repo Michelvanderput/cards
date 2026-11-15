@@ -6,6 +6,7 @@ struct CardMap {
     var sets: [Int: String] = [:]      // idExpansion -> setnaam
     var images: [Int: String] = [:]    // idProduct -> TCGdex-pad, bv. "en/base/base1/4"
     var setPaths: [Int: String] = [:]  // idExpansion -> TCGdex-setpad, bv. "en/base/base1" (voor het logo)
+    var setDates: [String: Date] = [:] // setpad -> releasedatum
     var exact: Set<Int> = []           // producten waarvan TCGdex het Cardmarket-id kent (betrouwbare koppeling)
 
     static let empty = CardMap()
@@ -18,6 +19,7 @@ struct CardMap {
             sets: Dictionary(uniqueKeysWithValues: raw.sets.compactMap { k, v in Int(k).map { ($0, v) } }),
             images: Dictionary(uniqueKeysWithValues: raw.images.compactMap { k, v in Int(k).map { ($0, v) } }),
             setPaths: Dictionary(uniqueKeysWithValues: (raw.setPaths ?? [:]).compactMap { k, v in Int(k).map { ($0, v) } }),
+            setDates: (raw.setDates ?? [:]).compactMapValues { Self.dateFormatter.date(from: $0) },
             exact: Set(raw.exact ?? []))
     }
 
@@ -26,13 +28,23 @@ struct CardMap {
         let images: [String: String]
         let exact: [Int]?
         let setPaths: [String: String]?
+        let setDates: [String: String]?
     }
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
 
     /// TCGdex-kaart-id (bv. "base1-4") voor exact gekoppelde producten.
     func tcgdexCardID(for productID: Int) -> String? {
         guard exact.contains(productID), let parts = images[productID]?.split(separator: "/"), parts.count >= 4 else { return nil }
         return "\(parts[parts.count - 2])-\(parts[parts.count - 1])"
     }
+
+    func releaseDate(expansion id: Int) -> Date? { setPaths[id].flatMap { setDates[$0] } }
 
     func setLogoURL(_ expansionID: Int) -> URL? {
         setPaths[expansionID].flatMap { URL(string: "https://assets.tcgdex.net/\($0)/logo.webp") }

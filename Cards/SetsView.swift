@@ -12,17 +12,31 @@ struct SetLogo: View {
     }
 }
 
+enum SetSort: String, CaseIterable, Identifiable {
+    case newest = "Nieuwste eerst", oldest = "Oudste eerst (chronologisch)", name = "A–Z"
+    var id: String { rawValue }
+}
+
 struct SetsView: View {
     @Environment(CatalogStore.self) private var catalog
     @State private var query = ""
-    @State private var sortNewest = true
+    @AppStorage("setSort") private var setSort: SetSort = .newest
     @AppStorage("onlyNamedSets") private var onlyNamed = true
 
     private var sets: [SetInfo] {
         var list = catalog.sets
         if onlyNamed { list = list.filter(\.isNamed) }
         if !query.isEmpty { list = list.filter { $0.name.localizedCaseInsensitiveContains(query) } }
-        return sortNewest ? list : list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        switch setSort {
+        case .newest: return list.sorted { ($0.releaseDate ?? .distantPast, $0.id) > ($1.releaseDate ?? .distantPast, $1.id) }
+        case .oldest: return list.sorted { ($0.releaseDate ?? .distantFuture, $0.id) < ($1.releaseDate ?? .distantFuture, $1.id) }
+        case .name: return list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
+    }
+
+    private func subtitle(_ set: SetInfo) -> String {
+        if let d = set.releaseDate { return "\(d.formatted(.dateTime.month(.abbreviated).year())) · \(set.count) kaarten" }
+        return "\(set.count) kaarten"
     }
 
     var body: some View {
@@ -33,7 +47,7 @@ struct SetsView: View {
                         SetLogo(set: set)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(set.name)
-                            Text("\(set.count) kaarten").font(.caption).foregroundStyle(.secondary)
+                            Text(subtitle(set)).font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -46,9 +60,8 @@ struct SetsView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                        Picker("Sorteren", selection: $sortNewest) {
-                            Text("Nieuwste eerst").tag(true)
-                            Text("A–Z").tag(false)
+                        Picker("Sorteren", selection: $setSort) {
+                            ForEach(SetSort.allCases) { Text($0.rawValue).tag($0) }
                         }
                         Toggle("Alleen sets met naam", isOn: $onlyNamed)
                     } label: { Label("Opties", systemImage: "line.3.horizontal.decrease.circle") }
@@ -108,7 +121,8 @@ struct SetDetailView: View {
         HStack(spacing: 14) {
             SetLogo(set: set, height: 44)
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(set.count) kaarten").font(.subheadline.weight(.medium))
+                Text(set.releaseDate.map { "\($0.formatted(.dateTime.day().month(.abbreviated).year())) · \(set.count) kaarten" } ?? "\(set.count) kaarten")
+                    .font(.subheadline.weight(.medium))
                 ProgressView(value: Double(owned), total: Double(max(set.count, 1))).tint(Theme.accent)
                 Text("\(owned) in je collectie").font(.caption).foregroundStyle(.secondary)
             }

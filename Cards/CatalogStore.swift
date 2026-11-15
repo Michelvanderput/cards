@@ -14,7 +14,7 @@ final class CatalogStore {
     let map = CardMap.load()
     private var searchIndex: [String] = []
     private(set) var sets: [SetInfo] = []
-    private(set) var itemsBySet: [Int: [CardItem]] = [:]
+    private(set) var itemsBySet: [Int: [CardItem]] = [:]   // SetInfo.id -> kaarten (alle samengevoegde delen)
 
     func setName(for item: CardItem) -> String? { map.sets[item.expansionId] }
     func imageURL(for item: CardItem, quality: CardMap.Quality) -> URL? { map.imageURL(for: item.id, quality: quality) }
@@ -45,6 +45,13 @@ final class CatalogStore {
         }
     }
 
+    /// Terugval voor sets zonder datum: een jaartal in de naam ("McDonald's Collection 2012") als 1 januari van dat jaar.
+    nonisolated private static func yearInName(_ name: String?) -> Date? {
+        guard let name, let r = name.range(of: #"\b(19|20)\d\d\b"#, options: .regularExpression),
+              let year = Int(name[r]) else { return nil }
+        return Calendar(identifier: .gregorian).date(from: DateComponents(year: year, month: 1, day: 1))
+    }
+
     func search(_ query: String, limit: Int = 300) -> [CardItem] {
         var out = searchAll(query)
         out.sort { ($0.mainPrice ?? -1) > ($1.mainPrice ?? -1) }
@@ -66,11 +73,25 @@ final class CatalogStore {
         items = snap.items
         byID = Dictionary(uniqueKeysWithValues: snap.items.map { ($0.id, $0) })
         lastUpdated = snap.fetchedAt
-        itemsBySet = Dictionary(grouping: snap.items, by: \.expansionId)
-        sets = itemsBySet.map { id, items in
-            SetInfo(id: id, name: map.sets[id] ?? "Set \(id)", isNamed: map.sets[id] != nil,
-                    count: items.count, logoURL: map.setLogoURL(id))
-        }.sorted { $0.id > $1.id }
+        // Cardmarket splitst één set vaak in meerdere "expansions" (promo's, andere uitvoeringen): voeg die samen op naam.
+        let byExp = Dictionary(grouping: snap.items, by: \.expansionId)
+        var groups: [String: [Int]] = [:]
+        for exp in byExp.keys { groups[map.sets[exp].map { "n:" + $0 } ?? "e:\(exp)", default: []].append(exp) }
+        var built: [SetInfo] = []
+        var bySet: [Int: [CardItem]] = [:]
+        for (_, exps) in groups {
+            let ids = exps.sorted()
+            let items = ids.flatMap { byExp[$0] ?? [] }
+            let id = ids[0]
+            let name = map.sets[id]
+            built.append(SetInfo(id: id, expansionIDs: ids, name: name ?? "Set \(id)", isNamed: name != nil,
+                                 count: items.count,
+                                 logoURL: ids.lazy.compactMap { self.map.setLogoURL($0) }.first,
+                                 releaseDate: ids.lazy.compactMap { self.map.releaseDate(expansion: $0) }.first ?? Self.yearInName(name)))
+            bySet[id] = items
+        }
+        sets = built
+        itemsBySet = bySet
         searchIndex = snap.items.map { ($0.name + " " + (map.sets[$0.expansionId] ?? "")).lowercased() }
     }
 
@@ -113,9 +134,11 @@ final class CatalogStore {
 }
 
 struct SetInfo: Identifiable, Hashable {
-    let id: Int          // Cardmarket idExpansion
+    let id: Int          // laagste Cardmarket idExpansion van de samengevoegde delen
+    let expansionIDs: [Int]
     let name: String
     let isNamed: Bool
     let count: Int
     let logoURL: URL?
+    let releaseDate: Date?
 }

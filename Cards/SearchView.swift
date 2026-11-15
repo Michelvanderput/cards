@@ -9,14 +9,14 @@ struct SearchView: View {
     @Environment(CatalogStore.self) private var catalog
     @State private var query = ""
     @State private var sort: SearchSort = .priceDesc
-    @State private var expansion: Int? = nil
+    @State private var setFilter: String? = nil
     @State private var onlyPriced = false
     @State private var showSettings = false
     @AppStorage("gridMode") private var gridMode = true
 
     private func results(from all: [CardItem]) -> [CardItem] {
         var out = all
-        if let expansion { out = out.filter { $0.expansionId == expansion } }
+        if let setFilter { out = out.filter { catalog.map.sets[$0.expansionId] == setFilter } }
         if onlyPriced { out = out.filter { $0.mainPrice != nil } }
         switch sort {
         case .priceDesc: out.sort { ($0.mainPrice ?? -1) > ($1.mainPrice ?? -1) }
@@ -27,9 +27,9 @@ struct SearchView: View {
     }
 
     /// Sets die in de huidige treffers voorkomen, met aantal.
-    private func setOptions(from all: [CardItem]) -> [(id: Int, name: String, count: Int)] {
-        Dictionary(grouping: all, by: \.expansionId)
-            .compactMap { id, items in catalog.map.sets[id].map { (id: id, name: $0, count: items.count) } }
+    private func setOptions(from all: [CardItem]) -> [(name: String, count: Int)] {
+        Dictionary(grouping: all.compactMap { catalog.map.sets[$0.expansionId] }, by: { $0 })
+            .map { (name: $0.key, count: $0.value.count) }
             .sorted { $0.count > $1.count }
             .prefix(40).map { $0 }
     }
@@ -70,12 +70,12 @@ struct SearchView: View {
                             ForEach(SearchSort.allCases) { Text($0.rawValue).tag($0) }
                         }
                         Toggle("Alleen met prijs", isOn: $onlyPriced)
-                        Picker("Set", selection: $expansion) {
-                            Text("Alle sets").tag(Int?.none)
-                            ForEach(setOptions(from: all), id: \.id) { Text("\($0.name) (\($0.count))").tag(Int?.some($0.id)) }
+                        Picker("Set", selection: $setFilter) {
+                            Text("Alle sets").tag(String?.none)
+                            ForEach(setOptions(from: all), id: \.name) { Text("\($0.name) (\($0.count))").tag(String?.some($0.name)) }
                         }
                     } label: {
-                        Label("Filter", systemImage: (expansion != nil || onlyPriced) ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        Label("Filter", systemImage: (setFilter != nil || onlyPriced) ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                     }
                     Button { Task { await catalog.refresh() } } label: {
                         if catalog.isLoading { ProgressView().controlSize(.small) }

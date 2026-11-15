@@ -3,11 +3,13 @@
 1. Exacte koppeling: TCGdex kent het Cardmarket idProduct.
 2. Aanvulling: naam + aanvalsnamen uit de Cardmarket-naam ("Pikachu [Thunder Shock]").
 3. Trainers/energy zonder aanvallen: alleen op naam.
-Gebruik: python3 Scripts/make_cardmap.py <cards2.jsonl> <set_names.json> <products_singles_6.json>"""
+Gebruik: python3 Scripts/make_cardmap.py <cards2.jsonl> <set_names.json> <products_singles_6.json> [set_dates.json]"""
 import json, re, sys
 from collections import Counter, defaultdict
 
 cards_path, sets_path, products_path = sys.argv[1:4]
+dates_path = sys.argv[4] if len(sys.argv) > 4 else None
+set_dates_by_id = json.load(open(dates_path)) if dates_path else {}
 set_names = json.load(open(sets_path))
 products = json.load(open(products_path))["products"]
 cards = [json.loads(l) for l in open(cards_path)]
@@ -73,10 +75,11 @@ for e, v in fuzzy_votes.items():
         sets[str(e)] = name
         set_paths[str(e)] = fuzzy_paths[e].most_common(1)[0][0]
 
-json.dump({"sets": sets, "setPaths": set_paths,
+set_dates = {path: set_dates_by_id[path.rsplit("/", 1)[1]] for path in set(set_paths.values()) if path.rsplit("/", 1)[1] in set_dates_by_id}
+json.dump({"sets": sets, "setPaths": set_paths, "setDates": set_dates,
            "images": {str(k): v for k, v in images.items()}, "exact": exact_ids},
           open("Cards/Resources/cardmap.json", "w"), separators=(",", ":"))
 total = len(products)
 print(f"images: {len(images)}/{total} ({100*len(images)/total:.1f}%), waarvan exact {exact}; "
       f"sets: {len(sets)}/{len(size)} expansions, producten met setnaam: "
-      f"{100*sum(size[int(e)] for e in sets)/total:.0f}%, logo's: {len(set_paths)}")
+      f"{100*sum(size[int(e)] for e in sets)/total:.0f}%, logo's: {len(set_paths)}, datums: {len(set_dates)}")
