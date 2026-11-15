@@ -4,9 +4,8 @@ struct SetLogo: View {
     let set: SetInfo
     var height: CGFloat = 36
     var body: some View {
-        AsyncImage(url: set.logoURL) { phase in
-            if let image = phase.image { image.resizable().scaledToFit() }
-            else { Image(systemName: "square.stack.3d.up").foregroundStyle(.tertiary) }
+        CachedImage(url: set.logoURL) { _ in
+            Image(systemName: "square.stack.3d.up").foregroundStyle(.tertiary)
         }
         .frame(width: height * 2.2, height: height)
     }

@@ -47,12 +47,8 @@ struct CardImage: View {
     @Environment(CatalogStore.self) private var catalog
 
     var body: some View {
-        AsyncImage(url: catalog.imageURL(for: item, quality: quality)) { phase in
-            switch phase {
-            case .success(let image): image.resizable().scaledToFit()
-            case .failure: placeholder(systemImage: "photo")
-            default: placeholder(systemImage: nil)
-            }
+        CachedImage(url: catalog.imageURL(for: item, quality: quality)) { failed in
+            placeholder(systemImage: failed ? "photo" : nil)
         }
         .aspectRatio(Theme.cardRatio, contentMode: .fit)
         .clipShape(.rect(cornerRadius: quality == .high ? 14 : 6))

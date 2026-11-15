@@ -29,6 +29,7 @@ struct CardsApp: App {
         // Ruime cache: kaartafbeeldingen hoeven zo niet steeds opnieuw geladen te worden.
         URLCache.shared = URLCache(memoryCapacity: 64 << 20, diskCapacity: 400 << 20)
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
+        Task.detached(priority: .utility) { await ImageStore.shared.prune() }
     }
 
     var body: some Scene {

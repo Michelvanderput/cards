@@ -4,6 +4,7 @@ struct SettingsView: View {
     @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .all
     @AppStorage("autoCheck") private var autoCheck = true
     @Environment(CatalogStore.self) private var catalog
+    @State private var imageBytes: Int64 = 0
 
     var body: some View {
         NavigationStack {
@@ -24,6 +25,14 @@ struct SettingsView: View {
                     }
                     LabeledContent("Kaarten", value: catalog.items.count.formatted())
                 }
+                Section {
+                    LabeledContent("Opgeslagen plaatjes", value: ByteCountFormatter.string(fromByteCount: imageBytes, countStyle: .file))
+                    Button("Plaatjescache wissen", role: .destructive) {
+                        Task { await ImageStore.shared.clear(); imageBytes = await ImageStore.shared.diskBytes() }
+                    }
+                } header: { Text("Afbeeldingen") } footer: {
+                    Text("Kaartplaatjes worden na het eerste laden op dit apparaat bewaard (maximaal ongeveer 800 MB), zodat ze direct en offline verschijnen.")
+                }
                 Section("Bronnen") {
                     Text("Prijzen: openbare Cardmarket price guide. Afbeeldingen en setnamen: TCGdex. Aanbiedingen worden uit de Cardmarket-pagina gelezen, wat tegen hun voorwaarden kan zijn.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -31,6 +40,7 @@ struct SettingsView: View {
             }
             .formStyle(.grouped)
             .navigationTitle("Instellingen")
+            .task { imageBytes = await ImageStore.shared.diskBytes() }
         }
     }
 }
