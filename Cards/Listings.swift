@@ -34,6 +34,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
     private(set) var listings: [Listing] = []
     private(set) var status: Status = .loading
     private var pollTask: Task<Void, Never>?
+    private var pendingFilter: Condition?
 
     override init() {
         webView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
@@ -47,7 +48,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
         status = .loading
         var comps = URLComponents(string: "https://www.cardmarket.com/en/Pokemon/Products")!
         comps.queryItems = [URLQueryItem(name: "idProduct", value: String(productID))]
-        if let minCondition { comps.queryItems?.append(URLQueryItem(name: "minCondition", value: String(minCondition.level))) }
+        pendingFilter = minCondition   // wordt na de doorverwijzing aan de echte pagina-URL toegevoegd
         webView.load(URLRequest(url: comps.url!))
         pollTask = Task { await poll() }
     }
@@ -59,6 +60,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
         for _ in 0..<120 {
             if Task.isCancelled { return }
             try? await Task.sleep(for: .seconds(1))
+            if applyFilterIfNeeded() { continue }   // eerst de gefilterde pagina laten laden
             guard let json = try? await webView.evaluateJavaScript(Self.extractJS) as? String,
                   let data = json.data(using: .utf8),
                   let page = try? JSONDecoder().decode(Page.self, from: data) else { continue }
@@ -80,6 +82,20 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
             status = page.title.contains("Just a moment") ? .needsCheck : .loading
         }
         status = .failed
+    }
+
+    /// Cardmarket stuurt `Products?idProduct=…` door naar de echte kaartpagina; daar voegen we het filter aan toe.
+    private func applyFilterIfNeeded() -> Bool {
+        guard let cond = pendingFilter, let url = webView.url,
+              url.host?.hasSuffix("cardmarket.com") == true, url.path.contains("/Singles/"),
+              var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
+        pendingFilter = nil
+        var items = (comps.queryItems ?? []).filter { $0.name != "minCondition" }
+        items.append(URLQueryItem(name: "minCondition", value: String(cond.level)))
+        comps.queryItems = items
+        guard let filtered = comps.url else { return false }
+        webView.load(URLRequest(url: filtered))
+        return true
     }
 
     private struct Page: Decodable {
