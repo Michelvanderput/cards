@@ -31,3 +31,4 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: nl.michelvanderput.cards
         ENABLE_PREVIEWS: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

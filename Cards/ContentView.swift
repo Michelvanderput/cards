@@ -7,6 +7,8 @@ struct ContentView: View {
                 .tabItem { Label("Zoeken", systemImage: "magnifyingglass") }
             WatchlistView()
                 .tabItem { Label("Watchlist", systemImage: "bell") }
+            SettingsView()
+                .tabItem { Label("Instellingen", systemImage: "gearshape") }
         }
     }
 }

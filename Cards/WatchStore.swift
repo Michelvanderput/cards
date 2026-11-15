@@ -14,6 +14,17 @@ struct WatchEntry: Identifiable, Codable, Hashable {
     var target: Double?
     var direction: AlertDirection = .below
     var alerted: Bool = false
+    /// Gezet = alert op de goedkoopste aanbieding in deze staat of beter (via de aanbiedingen-pagina).
+    /// Leeg = alert op de Cardmarket-trendprijs over alle staten.
+    var minCondition: Condition?
+    var lastCheapest: Double?
+    var lastChecked: Date?
+
+    var alertSummary: String? {
+        guard let target else { return nil }
+        if let minCondition { return "\(minCondition.rawValue)+ onder \(euro(target))" }
+        return "Trend \(direction.label.lowercased()) \(euro(target))"
+    }
 }
 
 @MainActor
@@ -22,6 +33,8 @@ final class WatchStore {
     private(set) var entries: [WatchEntry] = []
 
     init() { load() }
+
+    var conditionEntries: [WatchEntry] { entries.filter { $0.minCondition != nil && $0.target != nil } }
 
     func isWatching(_ id: Int) -> Bool { entries.contains { $0.id == id } }
     func entry(_ id: Int) -> WatchEntry? { entries.first { $0.id == id } }
@@ -37,25 +50,28 @@ final class WatchStore {
         save()
     }
 
-    func setAlert(_ id: Int, target: Double?, direction: AlertDirection) {
+    func setAlert(_ id: Int, target: Double?, direction: AlertDirection, minCondition: Condition?) {
         guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[i].target = target
-        entries[i].direction = direction
+        entries[i].direction = minCondition == nil ? direction : .below
+        entries[i].minCondition = minCondition
         entries[i].alerted = false
+        entries[i].lastCheapest = nil
+        entries[i].lastChecked = nil
         save()
         if target != nil { Task { await Self.requestPermission() } }
     }
 
-    /// Controleert alle prijsalerts tegen de nieuwste prijzen en stuurt notificaties.
+    /// Controleert de trend-alerts (alle staten) tegen de nieuwste prijsbestanden.
     func evaluate(catalog: CatalogStore) async {
         var changed = false
-        for i in entries.indices {
+        for i in entries.indices where entries[i].minCondition == nil {
             let e = entries[i]
             guard let target = e.target, let price = catalog.byID[e.id]?.mainPrice else { continue }
             let met = e.direction == .below ? price <= target : price >= target
             if met && !e.alerted {
                 await Self.notify(title: e.name,
-                                  body: "Prijs is nu \(price.formatted(.currency(code: "EUR"))) (\(e.direction.label.lowercased()) \(target.formatted(.currency(code: "EUR"))))")
+                                  body: "Trendprijs is nu \(euro(price)) (\(e.direction.label.lowercased()) \(euro(target)))")
                 entries[i].alerted = true
                 changed = true
             } else if !met && e.alerted {
@@ -66,13 +82,30 @@ final class WatchStore {
         if changed { save() }
     }
 
+    /// Verwerkt de goedkoopste aanbieding (staat of beter) voor een alert per staat.
+    func applyConditionResult(id: Int, cheapest: Double?) async {
+        guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[i].lastCheapest = cheapest
+        entries[i].lastChecked = Date()
+        defer { save() }
+        guard let target = entries[i].target, let cond = entries[i].minCondition, let cheapest else { return }
+        let met = cheapest <= target
+        if met && !entries[i].alerted {
+            await Self.notify(title: entries[i].name,
+                              body: "\(cond.rawValue)+ vanaf \(euro(cheapest)) (je alert: onder \(euro(target)))")
+            entries[i].alerted = true
+        } else if !met && entries[i].alerted {
+            entries[i].alerted = false
+        }
+    }
+
     // MARK: - Notificaties
 
     static func requestPermission() async {
         _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
     }
 
-    private static func notify(title: String, body: String) async {
+    static func notify(title: String, body: String) async {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body

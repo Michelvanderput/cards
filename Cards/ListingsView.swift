@@ -5,6 +5,7 @@ struct ListingsView: View {
     @State private var loader = ListingsLoader()
     @State private var minCondition: Condition? = nil
     @State private var language: String? = nil
+    @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .all
 
     private var filtered: [Listing] {
         loader.listings.filter { language == nil || $0.language == language }
@@ -37,8 +38,8 @@ struct ListingsView: View {
             }
         }
         .navigationTitle("Aanbiedingen")
-        .onAppear { loader.load(productID: item.id, minCondition: minCondition) }
-        .onChange(of: minCondition) { _, new in loader.load(productID: item.id, minCondition: new) }
+        .onAppear { loader.load(productID: item.id, minCondition: minCondition, language: languageFilter) }
+        .onChange(of: minCondition) { _, new in loader.load(productID: item.id, minCondition: new, language: languageFilter) }
         .onDisappear { loader.stop() }
     }
 
@@ -46,7 +47,7 @@ struct ListingsView: View {
         VStack(spacing: 8) {
             Picker("Minimale staat", selection: $minCondition) {
                 Text("Alle").tag(Condition?.none)
-                ForEach([Condition.nm, .ex, .gd, .lp]) { Text($0.rawValue + "+").tag(Condition?.some($0)) }
+                ForEach(Condition.filterChoices) { Text($0.rawValue + "+").tag(Condition?.some($0)) }
             }
             .pickerStyle(.segmented)
             if languages.count > 1 {

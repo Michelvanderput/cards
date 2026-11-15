@@ -41,8 +41,8 @@ struct DetailView: View {
             }
             Section {
                 if let e = watch.entry(item.id) {
-                    if let t = e.target {
-                        LabeledContent("Alert", value: "\(e.direction.label) \(euro(t))")
+                    if let summary = e.alertSummary {
+                        LabeledContent("Alert", value: summary)
                     }
                     Button("Alert instellen…") { showAlert = true }
                     Button("Van watchlist halen", role: .destructive) { watch.remove(item.id) }
@@ -74,37 +74,50 @@ struct AlertSheet: View {
     @Environment(WatchStore.self) private var watch
     @Environment(\.dismiss) private var dismiss
     @State private var direction: AlertDirection = .below
+    @State private var condition: Condition? = nil
     @State private var target: Double?
 
     var body: some View {
         NavigationStack {
             Form {
-                Picker("Melden wanneer prijs", selection: $direction) {
-                    ForEach(AlertDirection.allCases) { Text($0.label).tag($0) }
+                Picker("Staat", selection: $condition) {
+                    Text("Alle (trendprijs)").tag(Condition?.none)
+                    ForEach(Condition.filterChoices) { Text($0.rawValue + " of beter").tag(Condition?.some($0)) }
                 }
-                .pickerStyle(.segmented)
+                if condition == nil {
+                    Picker("Melden wanneer prijs", selection: $direction) {
+                        ForEach(AlertDirection.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                }
                 TextField("Prijs in EUR", value: $target, format: .number)
                     #if os(iOS)
                     .keyboardType(.decimalPad)
                     #endif
-                Text("Nu: \(euro(item.mainPrice))").foregroundStyle(.secondary)
+                Section {
+                    Text("Nu (trend, alle staten): \(euro(item.mainPrice))").foregroundStyle(.secondary)
+                    if condition != nil {
+                        Text("Alerts per staat kijken naar de goedkoopste aanbieding op Cardmarket. Dat gebeurt zolang de app open staat, of als je Watchlist controleren kiest.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
             }
             .navigationTitle("Prijsalert")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Annuleer") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Bewaar") {
-                        watch.setAlert(item.id, target: target, direction: direction)
+                        watch.setAlert(item.id, target: target, direction: direction, minCondition: condition)
                         dismiss()
                     }
                 }
             }
             .onAppear {
-                if let e = watch.entry(item.id) { direction = e.direction; target = e.target }
+                if let e = watch.entry(item.id) { direction = e.direction; target = e.target; condition = e.minCondition }
             }
         }
         #if os(macOS)
-        .frame(minWidth: 360, minHeight: 220)
+        .frame(minWidth: 380, minHeight: 280)
         #endif
     }
 }

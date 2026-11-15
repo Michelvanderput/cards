@@ -21,5 +21,9 @@ python3 Scripts/build_map.py        # haalt ~24k kaarten op (~10 min), schrijft 
 python3 Scripts/make_cardmap.py cards2.jsonl set_names.json products_singles_6.json
 ```
 
+## Alerts
+- **Trend-alert:** op de Cardmarket-trendprijs (alle staten). Wordt gecontroleerd bij het starten (en op iOS best effort op de achtergrond).
+- **Alert per staat** (NM/EX/GD/LP of beter): kijkt naar de goedkoopste aanbieding op de Cardmarket-pagina via een webweergave. Dat werkt alleen met de app open (bij het starten, op de Mac elke 30 min, of via *Watchlist controleren*). Vraagt Cardmarket een Cloudflare-controle, dan krijg je een melding om die zelf aan te tikken.
+
 ## Nog niet
 Kopen/verkopen, serverside pushmeldingen. Daarvoor is Cardmarket-API-toegang (OAuth) en een backend nodig.
