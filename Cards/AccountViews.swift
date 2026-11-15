@@ -46,7 +46,7 @@ struct MyStockView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(CollectionStore.self) private var collection
     @Environment(ConditionChecker.self) private var checker
-    @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .all
+    @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .defaultValue
     @State private var reader = StockReader()
     @State private var showCheck = false
     @State private var imported: Int?

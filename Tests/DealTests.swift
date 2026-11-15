@@ -187,3 +187,17 @@ final class PhotoAdviceTests: XCTestCase {
         XCTAssertEqual(SellerMessage.profileURL(seller: "Jan de Vries")?.absoluteString, "https://www.cardmarket.com/en/Pokemon/Users/Jan%20de%20Vries")
     }
 }
+
+final class LanguageFilterTests: XCTestCase {
+    private func listing(_ lang: String) -> Listing {
+        Listing(condition: "NM", language: lang, price: 10, quantity: 1, seller: lang, country: "Germany")
+    }
+
+    func testEnglishIsDefaultAndFiltersOthers() {
+        XCTAssertEqual(LanguageFilter.defaultValue, .english)
+        let all = ["English", "German", "Japanese", "", "French"].map(listing)
+        let english = LanguageFilter.apply(.english, to: all)
+        XCTAssertEqual(english.map(\.language), ["English"])
+        XCTAssertEqual(LanguageFilter.apply(.all, to: all).count, 5)
+    }
+}

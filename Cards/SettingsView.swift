@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .all
+    @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .defaultValue
     @AppStorage("autoCheck") private var autoCheck = true
     @Environment(CatalogStore.self) private var catalog
     @Environment(AppSettings.self) private var settings
@@ -21,10 +21,12 @@ struct SettingsView: View {
                     Text("Je logt zelf in op Cardmarket in een webweergave; de app ziet je wachtwoord niet. De sessie blijft bewaard zolang Cardmarket dat toestaat. Cardmarket biedt geen API meer aan, dus de app leest pagina's uit zoals een browser dat doet.")
                 }
 
-                Section("Aanbiedingen") {
+                Section {
                     Picker("Taal", selection: $languageFilter) {
                         ForEach(LanguageFilter.allCases) { Text($0.label).tag($0) }
                     }
+                } header: { Text("Aanbiedingen") } footer: {
+                    Text("Met \"Alleen Engels\" ziet de app alleen Engelse aanbiedingen. Dat geldt ook voor dealscores, marktstatistieken, alerts en bundelen.")
                 }
 
                 Section {

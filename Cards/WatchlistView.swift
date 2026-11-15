@@ -6,7 +6,7 @@ struct WatchlistView: View {
     @Environment(ConditionChecker.self) private var checker
     @Environment(MarketStore.self) private var market
     @Environment(AppSettings.self) private var settings
-    @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .all
+    @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .defaultValue
     @State private var showCheck = false
     @State private var showBundle = false
 

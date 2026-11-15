@@ -24,7 +24,7 @@ struct CardsApp: App {
     @State private var appSettings = AppSettings()
     @State private var session = CardmarketSession()
     @AppStorage("autoCheck") private var autoCheck = true
-    @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .all
+    @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .defaultValue
     @Environment(\.scenePhase) private var scenePhase
 
     init() {

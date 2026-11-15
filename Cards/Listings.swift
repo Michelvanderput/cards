@@ -40,6 +40,14 @@ enum LanguageFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String { self == .all ? "Alle talen" : "Alleen Engels" }
     var queryItem: URLQueryItem? { self == .english ? URLQueryItem(name: "language", value: "1") : nil }
+    /// Je koopt alleen Engelse kaarten, dus dit is de standaard.
+    static let defaultValue: LanguageFilter = .english
+
+    /// Houdt alleen aanbiedingen in de gekozen taal over. Wordt altijd in de app zelf toegepast,
+    /// ook als Cardmarket het taalfilter in de URL negeert. Aanbiedingen zonder herkende taal vallen bij Engels af.
+    static func apply(_ filter: LanguageFilter, to listings: [Listing]) -> [Listing] {
+        filter == .english ? listings.filter { $0.language == "English" } : listings
+    }
 }
 
 /// Laadt een Cardmarket-productpagina in een gewone webweergave (zodat Cloudflares controle
@@ -56,6 +64,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
     private(set) var isPolling = false
     private var pollTask: Task<Void, Never>?
     private var pendingQuery: [URLQueryItem] = []
+    private var languageFilter: LanguageFilter = .defaultValue
     private var generation = 0
 
     override init() {
@@ -64,7 +73,8 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
         webView.navigationDelegate = self
     }
 
-    func load(productID: Int, minCondition: Condition?, language: LanguageFilter = .all) {
+    func load(productID: Int, minCondition: Condition?, language: LanguageFilter = .defaultValue) {
+        languageFilter = language
         pollTask?.cancel()
         status = .loading   // oude lijst blijft staan tot de nieuwe binnen is
         var comps = URLComponents(string: "https://www.cardmarket.com/en/Pokemon/Products")!
@@ -137,7 +147,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
                 let final = (try? await webView.evaluateJavaScript(Self.extractJS) as? String)
                     .flatMap { $0.data(using: .utf8) }
                     .flatMap { try? JSONDecoder().decode(Page.self, from: $0) } ?? page
-                listings = final.rows.compactMap(Self.parse).sorted { $0.price < $1.price }
+                listings = LanguageFilter.apply(languageFilter, to: final.rows.compactMap(Self.parse)).sorted { $0.price < $1.price }
                 status = .done
                 return
             }

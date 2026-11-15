@@ -14,7 +14,7 @@ struct ListingsView: View {
     @State private var language: String? = nil
     @State private var sort: ListingSort = .bestDeal
     @State private var selected: Listing?
-    @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .all
+    @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .defaultValue
 
     private var filtered: [Listing] {
         loader.listings.filter { language == nil || $0.language == language }
@@ -45,6 +45,7 @@ struct ListingsView: View {
         .navigationTitle("Aanbiedingen")
         .onAppear { loader.load(productID: item.id, minCondition: minCondition, language: languageFilter) }
         .onChange(of: minCondition) { _, new in loader.load(productID: item.id, minCondition: new, language: languageFilter) }
+        .onChange(of: languageFilter) { _, new in language = nil; loader.load(productID: item.id, minCondition: minCondition, language: new) }
         .onChange(of: loader.status) { _, new in
             if new == .done { market.recordListings(id: item.id, minCondition: minCondition, listings: loader.listings) }
         }
@@ -62,6 +63,9 @@ struct ListingsView: View {
             }
             .pickerStyle(.segmented)
             HStack {
+                Toggle("Alleen Engels", isOn: Binding(get: { languageFilter == .english },
+                                                      set: { languageFilter = $0 ? .english : .all }))
+                    .toggleStyle(.switch).fixedSize()
                 if languages.count > 1 {
                     Picker("Taal", selection: $language) {
                         Text("Alle talen").tag(String?.none)

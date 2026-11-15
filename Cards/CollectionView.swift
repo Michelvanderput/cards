@@ -8,7 +8,7 @@ struct CollectionView: View {
     @Environment(MarketStore.self) private var market
     @Environment(AppSettings.self) private var settings
     @Environment(ConditionChecker.self) private var checker
-    @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .all
+    @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .defaultValue
     @State private var editing: CollectionEntry?
     @State private var query = ""
     @State private var onlyForSale = false
