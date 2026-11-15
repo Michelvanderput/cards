@@ -44,14 +44,20 @@ final class CatalogStore {
     }
 
     func search(_ query: String, limit: Int = 300) -> [CardItem] {
+        var out = searchAll(query)
+        out.sort { ($0.mainPrice ?? -1) > ($1.mainPrice ?? -1) }
+        return Array(out.prefix(limit))
+    }
+
+    /// Alle treffers, ongesorteerd (filteren en sorteren doet de view).
+    func searchAll(_ query: String) -> [CardItem] {
         let tokens = query.lowercased().split(separator: " ").map(String.init)
         guard !tokens.isEmpty else { return [] }
         var out: [CardItem] = []
         for (i, haystack) in searchIndex.enumerated() where tokens.allSatisfy({ haystack.contains($0) }) {
             out.append(items[i])
         }
-        out.sort { ($0.mainPrice ?? -1) > ($1.mainPrice ?? -1) }
-        return Array(out.prefix(limit))
+        return out
     }
 
     private func apply(_ snap: Snapshot) {

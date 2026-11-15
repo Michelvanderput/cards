@@ -44,8 +44,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
 
     func load(productID: Int, minCondition: Condition?) {
         pollTask?.cancel()
-        listings = []
-        status = .loading
+        status = .loading   // oude lijst blijft staan tot de nieuwe binnen is
         var comps = URLComponents(string: "https://www.cardmarket.com/en/Pokemon/Products")!
         comps.queryItems = [URLQueryItem(name: "idProduct", value: String(productID))]
         pendingFilter = minCondition   // wordt na de doorverwijzing aan de echte pagina-URL toegevoegd
@@ -57,6 +56,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
 
     private func poll() async {
         // Wacht tot de aanbiedingen op de pagina staan (of tot jij de controle hebt doorlopen).
+        var emptyStreak = 0
         for _ in 0..<120 {
             if Task.isCancelled { return }
             try? await Task.sleep(for: .seconds(1))
@@ -79,7 +79,15 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
                 status = .done
                 return
             }
-            status = page.title.contains("Just a moment") ? .needsCheck : .loading
+            if page.title.contains("Just a moment") {
+                status = .needsCheck
+                emptyStreak = 0
+            } else {
+                status = .loading
+                if !webView.isLoading { emptyStreak += 1 }
+                // Pagina geladen maar geen aanbiedingen: waarschijnlijk geen resultaat voor dit filter.
+                if emptyStreak >= 8 { listings = []; status = .done; return }
+            }
         }
         status = .failed
     }

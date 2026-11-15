@@ -4,48 +4,36 @@ struct ListingsView: View {
     let item: CardItem
     @State private var loader = ListingsLoader()
     @State private var minCondition: Condition? = nil
+    @State private var language: String? = nil
 
+    private var filtered: [Listing] {
+        loader.listings.filter { language == nil || $0.language == language }
+    }
+    private var languages: [String] {
+        Array(Set(loader.listings.map(\.language))).filter { !$0.isEmpty }.sorted()
+    }
     private var cheapestPerCondition: [(String, Listing)] {
-        Dictionary(grouping: loader.listings, by: \.condition)
+        Dictionary(grouping: filtered, by: \.condition)
             .compactMap { code, items in items.min { $0.price < $1.price }.map { (code, $0) } }
             .sorted { Condition.order($0.0) < Condition.order($1.0) }
     }
+    private var needsCheck: Bool { loader.status == .needsCheck }
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("Minimale staat", selection: $minCondition) {
-                Text("Alle").tag(Condition?.none)
-                ForEach([Condition.nm, .ex, .gd, .lp]) { Text($0.rawValue + "+").tag(Condition?.some($0)) }
-            }
-            .pickerStyle(.segmented)
-            .padding()
-
-            if loader.status == .done {
-                List {
-                    Section("Goedkoopste per staat") {
-                        ForEach(cheapestPerCondition, id: \.0) { code, l in
-                            LabeledContent(code, value: euro(l.price))
-                        }
-                    }
-                    Section("Aanbiedingen (\(loader.listings.count))") {
-                        ForEach(loader.listings) { l in
-                            HStack {
-                                Text(l.condition).font(.caption.bold()).padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(.quaternary, in: .rect(cornerRadius: 4))
-                                VStack(alignment: .leading) {
-                                    Text(l.seller)
-                                    Text("\(l.country) · \(l.language) · \(l.quantity)×").font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text(euro(l.price)).monospacedDigit()
-                            }
-                        }
-                    }
+            controls
+            ZStack {
+                // De webweergave blijft altijd bestaan (nodig om te laden), maar is alleen zichtbaar
+                // als Cardmarket een beveiligingscontrole vraagt.
+                VStack(spacing: 6) {
+                    Text("Cardmarket vraagt een beveiligingscontrole. Vink 'Verify you are human' hieronder zelf aan.")
+                        .font(.footnote).foregroundStyle(.secondary).padding(.horizontal)
+                    WebViewHost(webView: loader.webView)
                 }
-                WebViewHost(webView: loader.webView).frame(height: 0)
-            } else {
-                Text(hint).font(.footnote).foregroundStyle(.secondary).padding(.horizontal)
-                WebViewHost(webView: loader.webView)
+                .opacity(needsCheck ? 1 : 0)
+                .allowsHitTesting(needsCheck)
+
+                if !needsCheck { content.background(.background) }
             }
         }
         .navigationTitle("Aanbiedingen")
@@ -54,11 +42,57 @@ struct ListingsView: View {
         .onDisappear { loader.stop() }
     }
 
-    private var hint: String {
-        switch loader.status {
-        case .needsCheck: "Cardmarket vraagt een beveiligingscontrole. Vink 'Verify you are human' hieronder zelf aan."
-        case .failed: "Geen aanbiedingen gevonden of Cardmarket is veranderd. Probeer een andere staat."
-        default: "Cardmarket laden…"
+    private var controls: some View {
+        VStack(spacing: 8) {
+            Picker("Minimale staat", selection: $minCondition) {
+                Text("Alle").tag(Condition?.none)
+                ForEach([Condition.nm, .ex, .gd, .lp]) { Text($0.rawValue + "+").tag(Condition?.some($0)) }
+            }
+            .pickerStyle(.segmented)
+            if languages.count > 1 {
+                Picker("Taal", selection: $language) {
+                    Text("Alle talen").tag(String?.none)
+                    ForEach(languages, id: \.self) { Text($0).tag(String?.some($0)) }
+                }
+            }
+        }
+        .padding()
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if loader.status == .failed && loader.listings.isEmpty {
+            ContentUnavailableView("Niets gevonden", systemImage: "exclamationmark.triangle",
+                                   description: Text("Cardmarket gaf geen aanbiedingen terug, of de pagina is veranderd."))
+        } else if loader.listings.isEmpty && loader.status == .loading {
+            ProgressView("Aanbiedingen laden…").frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if filtered.isEmpty {
+            ContentUnavailableView("Geen aanbiedingen", systemImage: "tray",
+                                   description: Text("Er zijn geen aanbiedingen met dit filter."))
+        } else {
+            List {
+                Section("Goedkoopste per staat") {
+                    ForEach(cheapestPerCondition, id: \.0) { code, l in
+                        LabeledContent(code, value: euro(l.price))
+                    }
+                }
+                Section("Aanbiedingen (\(filtered.count))") {
+                    ForEach(filtered) { l in
+                        HStack {
+                            Text(l.condition).font(.caption.bold()).padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(.quaternary, in: .rect(cornerRadius: 4))
+                            VStack(alignment: .leading) {
+                                Text(l.seller)
+                                Text("\(l.country) · \(l.language) · \(l.quantity)×").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(euro(l.price)).monospacedDigit()
+                        }
+                    }
+                }
+            }
+            .opacity(loader.status == .loading ? 0.45 : 1)
+            .overlay { if loader.status == .loading { ProgressView() } }
         }
     }
 }
