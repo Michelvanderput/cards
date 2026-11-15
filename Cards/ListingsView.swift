@@ -95,7 +95,11 @@ struct ListingsView: View {
 
     @ViewBuilder
     private func content(_ scores: [UUID: DealScore]) -> some View {
-        if loader.status == .failed && loader.listings.isEmpty {
+        if loader.status == .rateLimited {
+            ContentUnavailableView("Even pauze", systemImage: "hourglass",
+                                   description: Text(RateLimitState.shared.isCoolingDown ? RateLimitState.shared.message
+                                                     : "Cardmarket beperkt het aantal verzoeken. Probeer het over een paar minuten opnieuw."))
+        } else if loader.status == .failed && loader.listings.isEmpty {
             ContentUnavailableView("Niets gevonden", systemImage: "exclamationmark.triangle",
                                    description: Text("Cardmarket gaf geen aanbiedingen terug, of de pagina is veranderd."))
         } else if loader.listings.isEmpty && loader.status == .loading {
@@ -406,6 +410,7 @@ struct PhotoCheckSheet: View {
     private var message: String {
         switch (loader.status, found) {
         case (.needsCheck, _): "Vink eerst de beveiligingscontrole aan."
+        case (.rateLimited, _): "Cardmarket beperkt even het aantal verzoeken. Probeer het over een paar minuten opnieuw."
         case (_, nil): "Pagina laden…"
         case (_, true?): "De rij van \(listing.seller) is gemarkeerd. Beweeg over of tik op het camera-icoontje om de foto te zien."
         case (_, false?): "Deze aanbieding is niet meer gevonden (misschien verkocht of verlopen). Zoek \(listing.seller) op de pagina."

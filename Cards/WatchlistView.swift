@@ -107,7 +107,8 @@ struct CheckSheet: View {
             VStack(spacing: 10) {
                 if checker.isRunning {
                     ProgressView(value: Double(checker.done), total: Double(max(checker.total, 1)))
-                    Text("Controleer \(checker.current?.cleanCardName ?? "…") (\(min(checker.done + 1, checker.total)) van \(checker.total))")
+                    Text(checker.isResting ? "Even rust om Cardmarket niet te overbelasten… (\(checker.done) van \(checker.total))"
+                                           : "Controleer \(checker.current?.cleanCardName ?? "…") (\(min(checker.done + 1, checker.total)) van \(checker.total))")
                         .font(.footnote).foregroundStyle(.secondary)
                     if let remaining = checker.remainingEstimate {
                         Text(eta(remaining)).font(.caption).foregroundStyle(.secondary)
@@ -116,6 +117,10 @@ struct CheckSheet: View {
                 } else {
                     Text(checker.total == 0 ? "Klaar om te starten." : "Klaar: \(checker.done) van \(checker.total) kaarten gecontroleerd.")
                         .font(.footnote).foregroundStyle(.secondary)
+                }
+                if RateLimitState.shared.isCoolingDown {
+                    Label(RateLimitState.shared.message, systemImage: "hourglass")
+                        .font(.footnote).foregroundStyle(.orange)
                 }
                 if checker.needsCheckNow {
                     Text("Cardmarket vraagt een beveiligingscontrole. Vink 'Verify you are human' hieronder zelf aan. De zoektocht gaat daarna vanzelf verder.")

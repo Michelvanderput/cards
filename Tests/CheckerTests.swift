@@ -3,6 +3,22 @@ import XCTest
 
 @MainActor
 final class CheckerTests: XCTestCase {
+    private var savedRateLimit: RateLimitState!
+
+    override func setUp() async throws {
+        // Geen echt netwerk en geen echte pauzes; een eigen wachttijd-status zodat de echte app er niets van merkt.
+        savedRateLimit = RateLimitState.shared
+        RateLimitState.shared = RateLimitState(defaults: UserDefaults(suiteName: "cards-tests-\(UUID().uuidString)")!)
+        await RequestGate.shared.configure(minimum: 0, jitter: 0)
+        ListingsLoader.testStartURL = { _ in PageFixtures.dataURL(PageFixtures.neverReady) }
+    }
+
+    override func tearDown() async throws {
+        ListingsLoader.testStartURL = nil
+        RateLimitState.shared = savedRateLimit
+        await RequestGate.shared.configure(minimum: 5, jitter: 3)
+    }
+
     private func market() -> MarketStore { MarketStore(storage: URL.temporaryDirectory.appending(path: "cards-checker-\(UUID().uuidString)")) }
     private let jobs: [(productID: Int, name: String, condition: Condition?)] = [
         (275749, "Mewtwo ex", .ex), (276752, "Meganium ex", .ex), (275974, "Rayquaza ex", .ex),

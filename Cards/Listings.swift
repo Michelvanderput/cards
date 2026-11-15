@@ -65,7 +65,7 @@ enum LanguageFilter: String, CaseIterable, Identifiable {
 @MainActor
 @Observable
 final class ListingsLoader: NSObject, WKNavigationDelegate {
-    enum Status { case loading, needsCheck, done, failed }
+    enum Status { case loading, needsCheck, done, failed, rateLimited }
 
     let webView: WKWebView
     private(set) var listings: [Listing] = []
@@ -76,33 +76,81 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
     private var languageFilter: LanguageFilter = .defaultValue
     private var hideGraded = true
     private var maxLoadMore = 3
+    private var currentProductID: Int?
+    /// Wat de pagina laatst liet zien (titel, adres, begin van de tekst); voor foutopsporing bij een time-out.
+    private(set) var lastDiagnostic = ""
     /// Aantal verborgen gegradeerde aanbiedingen in de laatste lading.
     private(set) var hiddenGradedCount = 0
     private var generation = 0
 
-    override init() {
+    private var rulesTask: Task<Void, Never>?
+    /// Alleen voor tests: levert een eigen (lokale) pagina in plaats van Cardmarket.
+    nonisolated(unsafe) static var testStartURL: ((Int) -> URL)?
+
+    /// - Parameter blockHeavyResources: voor het scannen: geen plaatjes, lettertypen of trackers laden. Dat scheelt een groot deel
+    ///   van de verzoeken per pagina en dus de kans op een blokkade. Voor schermen die jij bekijkt blijft dit uit.
+    init(blockHeavyResources: Bool = false) {
         webView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
         super.init()
         webView.navigationDelegate = self
+        if blockHeavyResources {
+            rulesTask = Task { [webView] in
+                guard let list = try? await WKContentRuleListStore.default()
+                    .compileContentRuleList(forIdentifier: "cards-light", encodedContentRuleList: Self.lightRules) else { return }
+                webView.configuration.userContentController.add(list)
+            }
+        }
     }
 
+    /// Regels voor het scannen: plaatjes, lettertypen en media blokkeren, plus bekende trackers van derden.
+    /// Scripts blijven werken, ook die van de Cloudflare-controle.
+    static let lightRules = #"""
+    [{"trigger":{"url-filter":".*","resource-type":["image","font","media"]},"action":{"type":"block"}},{"trigger":{"url-filter":"googletagmanager\\.com","load-type":["third-party"]},"action":{"type":"block"}},{"trigger":{"url-filter":"google-analytics\\.com","load-type":["third-party"]},"action":{"type":"block"}},{"trigger":{"url-filter":"doubleclick\\.net","load-type":["third-party"]},"action":{"type":"block"}},{"trigger":{"url-filter":"facebook\\.net","load-type":["third-party"]},"action":{"type":"block"}},{"trigger":{"url-filter":"connect\\.facebook","load-type":["third-party"]},"action":{"type":"block"}},{"trigger":{"url-filter":"hotjar\\.com","load-type":["third-party"]},"action":{"type":"block"}},{"trigger":{"url-filter":"cloudflareinsights\\.com","load-type":["third-party"]},"action":{"type":"block"}}]
+    """#
+
     func load(productID: Int, minCondition: Condition?, language: LanguageFilter = .defaultValue, loadMore: Int = 3) {
+        pollTask?.cancel()
         languageFilter = language
         maxLoadMore = loadMore
         hideGraded = Self.hideGradedSetting
-        pollTask?.cancel()
-        status = .loading   // oude lijst blijft staan tot de nieuwe binnen is
-        var comps = URLComponents(string: "https://www.cardmarket.com/en/Pokemon/Products")!
-        comps.queryItems = [URLQueryItem(name: "idProduct", value: String(productID))]
-        // Cardmarket stuurt door naar de echte pagina; de filters voegen we daar pas aan toe.
-        pendingQuery = []
-        if let minCondition { pendingQuery.append(URLQueryItem(name: "minCondition", value: String(minCondition.level))) }
-        if let q = language.queryItem { pendingQuery.append(q) }
-        webView.load(URLRequest(url: comps.url!))
         generation += 1
         let gen = generation
+        // Tijdens een blokkade door Cardmarket sturen we helemaal niets.
+        if RateLimitState.shared.isCoolingDown {
+            status = .rateLimited
+            isPolling = false
+            return
+        }
+        status = .loading   // oude lijst blijft staan tot de nieuwe binnen is
+
+        var filters: [URLQueryItem] = []
+        if let minCondition { filters.append(URLQueryItem(name: "minCondition", value: String(minCondition.level))) }
+        if let q = language.queryItem { filters.append(q) }
+        let startURL: URL
+        if let test = Self.testStartURL {
+            startURL = test(productID)
+            pendingQuery = []
+        } else if let known = ResolvedURLs.url(for: productID), var c = URLComponents(url: known, resolvingAgainstBaseURL: false) {
+            // We kennen de echte pagina al: één lading, mét filters (geen doorverwijzing en geen tweede lading).
+            c.queryItems = filters.isEmpty ? nil : filters
+            startURL = c.url ?? known
+            pendingQuery = []
+        } else {
+            var comps = URLComponents(string: "https://www.cardmarket.com/en/Pokemon/Products")!
+            comps.queryItems = [URLQueryItem(name: "idProduct", value: String(productID))]
+            startURL = comps.url!
+            pendingQuery = filters   // Cardmarket stuurt door naar de echte pagina; de filters voegen we daar pas aan toe
+        }
+        currentProductID = productID
         isPolling = true
-        pollTask = Task { await poll(gen) }
+        pollTask = Task { [weak self] in
+            guard let self else { return }
+            defer { if gen == self.generation { self.isPolling = false } }
+            await self.rulesTask?.value
+            guard await RequestGate.shared.waitTurn(), !Task.isCancelled, gen == self.generation else { return }
+            self.webView.load(URLRequest(url: startURL))
+            await self.poll(gen)
+        }
     }
 
     func stop() {
@@ -166,15 +214,26 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
                 let parsed = LanguageFilter.apply(languageFilter, to: final.rows.compactMap(Self.parse))
                 hiddenGradedCount = hideGraded ? parsed.filter(\.isGraded).count : 0
                 listings = (hideGraded ? parsed.filter { !$0.isGraded } : parsed).sorted { $0.price < $1.price }
+                if let id = currentProductID { ResolvedURLs.remember(webView.url, for: id) }
                 status = .done
                 return
             }
             if page.challenge {
                 status = .needsCheck
                 emptyStreak = 0
+            } else if RateLimitState.isBlockPage(title: page.title, body: page.body) {
+                // Cloudflare "Error 1015": we sturen te veel verzoeken. Meteen stoppen en een tijd wachten.
+                lastDiagnostic = page.title + " | " + page.body
+                RateLimitState.shared.register()
+                status = .rateLimited
+                return
             } else {
                 status = .loading
                 loadingTicks += 1
+                if loadingTicks == 12 || loadingTicks == 39 {
+                    let info = try? await webView.evaluateJavaScript("document.title + ' | ' + location.href.split('?')[0] + ' | ' + (document.body ? document.body.innerText.replace(/\\s+/g,' ').slice(0,160) : 'geen body')") as? String
+                    lastDiagnostic = info ?? "geen antwoord van de pagina"
+                }
                 if loadingTicks >= 40 { break }   // pagina laadt niet: sla deze kaart over in plaats van minutenlang te wachten
                 // Alleen een echte productpagina zonder aanbiedingen telt als "geen resultaat voor dit filter".
                 if page.real && !webView.isLoading { emptyStreak += 1 }
@@ -202,6 +261,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
     private struct Page: Decodable {
         struct Row: Decodable { let cond, lang, price, qty, seller, loc, rating, salesTitle, deliveryTitle, comment: String; let photo: Bool; let flags: [String]; let pro: Bool }
         let title: String
+        let body: String
         let challenge: Bool   // Cloudflare-controle (taalonafhankelijk herkend)
         let real: Bool        // echte Cardmarket-productpagina
         let rows: [Row]
@@ -255,7 +315,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
       const challenge=!!document.querySelector('script[src*="challenge-platform"],#challenge-error-text,.cf-turnstile,#cf-chl-widget,#challenge-form')
         || /just a moment|even geduld|un instant|einen moment|un momento/i.test(document.title);
       const real=!challenge && !!document.querySelector('.table-body,#tabContent-info,.page-title-container');
-      return JSON.stringify({title:document.title,challenge:challenge,real:real,rows:rows});
+      return JSON.stringify({title:document.title,body:(document.body?document.body.innerText.replace(/\\s+/g,' ').slice(0,300):''),challenge:challenge,real:real,rows:rows});
     })()
     """
 }

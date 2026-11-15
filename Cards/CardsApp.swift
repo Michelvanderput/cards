@@ -91,6 +91,11 @@ struct CardsApp: App {
                     }
                     await CloudSync.shared.start()
                     await refreshAll()
+                    #if DEBUG
+                    if let i = CommandLine.arguments.firstIndex(of: "--selftest-search"), i + 1 < CommandLine.arguments.count {
+                        await selfTestSearch(count: Int(CommandLine.arguments[i + 1]) ?? 10)
+                    }
+                    #endif
                     #if os(macOS)
                     // Op de Mac blijft de app vaak open: elke 30 minuten alerts opnieuw controleren.
                     while !Task.isCancelled {
@@ -153,6 +158,29 @@ struct CardsApp: App {
                                 interactive: false, minimumAge: 3 * 3600, maxEntries: 12)
         }
     }
+
+    #if DEBUG
+    /// Alleen voor ontwikkeling: draait de zoektocht naar beste deals over de eerste N ontbrekende kaarten en logt de voortgang.
+    @MainActor
+    private func selfTestSearch(count: Int) async {
+        NSLog("SEARCH start: catalogus %d items", catalog.items.count)
+        let cards = catalog.goalCards(.exEra)
+        let jobs = Array(cards.prefix(count)).map { (productID: $0.id, name: $0.name, condition: Optional(Condition.ex)) }
+        NSLog("SEARCH doel heeft %d kaarten, zoek %d", cards.count, jobs.count)
+        let monitor = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                NSLog("SEARCH ..voortgang done=%d/%d huidig=%@ status=%@ loading=%d", checker.done, checker.total,
+                      checker.current?.cleanCardName ?? "-", "\(checker.loader.status)", checker.loader.webView.isLoading ? 1 : 0)
+            }
+        }
+        let t0 = Date()
+        let fetched = await checker.refreshMarket(jobs: jobs, language: .english, market: market, interactive: true)
+        monitor.cancel()
+        NSLog("SEARCH klaar: %d opgehaald in %.0fs, needsAttention=%d", fetched, Date().timeIntervalSince(t0), checker.needsAttention ? 1 : 0)
+        exit(0)
+    }
+    #endif
 
     nonisolated static let refreshID = "nl.michelvanderput.cards.refresh"
 

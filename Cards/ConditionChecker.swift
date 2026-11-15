@@ -7,7 +7,10 @@ import Observation
 @MainActor
 @Observable
 final class ConditionChecker {
-    let loader = ListingsLoader()
+    /// De controle laadt zonder plaatjes en trackers: veel minder verkeer naar Cardmarket per pagina.
+    let loader = ListingsLoader(blockHeavyResources: true)
+    /// Wanneer een kaart voor het laatst is opgehaald (met staat en taal), zodat we hem niet meteen opnieuw laden.
+    private var fetchedAt: [Int: (date: Date, key: String)] = [:]
     private(set) var isRunning = false
     private(set) var current: String?
     private(set) var done = 0
@@ -18,6 +21,10 @@ final class ConditionChecker {
     private(set) var lastListings: [Int: [Listing]] = [:]
     private var lastAttentionNotice: Date?
     private var cancelRequested = false
+    /// Na zoveel opgehaalde kaarten volgt een rustpauze (seconden), zodat een grote scan niet aanhoudend veel verkeer geeft.
+    var breakEvery = 20
+    var breakSeconds: TimeInterval = 45
+    private(set) var isResting = false
 
     var needsCheckNow: Bool { loader.status == .needsCheck }
 
@@ -52,7 +59,7 @@ final class ConditionChecker {
         return !(honoringCancel && (Task.isCancelled || cancelRequested))
     }
 
-    private enum Wait { case finished, cancelled, needsAttention }
+    private enum Wait { case finished, cancelled, needsAttention, rateLimited }
 
     /// Wacht tot de aanbieding is geladen. Stopt meteen bij annuleren.
     private func waitForLoader(interactive: Bool) async -> Wait {
@@ -61,6 +68,7 @@ final class ConditionChecker {
             do { try await Task.sleep(for: .milliseconds(400)) } catch { loader.stop(); return .cancelled }
             if !interactive && loader.status == .needsCheck { loader.stop(); return .needsAttention }
         }
+        if loader.status == .rateLimited { return .rateLimited }
         return (Task.isCancelled || cancelRequested) ? .cancelled : .finished
     }
 
@@ -75,6 +83,7 @@ final class ConditionChecker {
 
     private func end() {
         isRunning = false
+        isResting = false
         current = nil
         startedAt = nil
     }
@@ -101,6 +110,7 @@ final class ConditionChecker {
             await preemptRunningJob()
             if isRunning { return }
         }
+        guard !RateLimitState.shared.isCoolingDown else { return }   // Cardmarket beperkt ons: even niets sturen
         let due = Self.selectDue(watch.conditionEntries, minimumAge: minimumAge, maxEntries: maxEntries)
         guard !due.isEmpty else { return }
         begin(total: due.count)
@@ -118,6 +128,9 @@ final class ConditionChecker {
                 needsAttention = true
                 await watch.sendDeals(deals)
                 await noticeAttention()
+                return
+            case .rateLimited:
+                await watch.sendDeals(deals)
                 return
             case .finished: break
             }
@@ -156,8 +169,8 @@ final class ConditionChecker {
     /// Geeft het aantal kaarten terug dat daadwerkelijk is opgehaald.
     @discardableResult
     func refreshMarket(jobs: [(productID: Int, name: String, condition: Condition?)], language: LanguageFilter,
-                       market: MarketStore, interactive: Bool) async -> Int {
-        guard !jobs.isEmpty else { return 0 }
+                       market: MarketStore, interactive: Bool, maxAge: TimeInterval = 30 * 60) async -> Int {
+        guard !jobs.isEmpty, !RateLimitState.shared.isCoolingDown else { return 0 }
         if isRunning {
             guard interactive else { return 0 }
             await preemptRunningJob()
@@ -169,19 +182,41 @@ final class ConditionChecker {
         loop: for job in jobs {
             if Task.isCancelled || cancelRequested { break }
             current = job.name
+            // Net opgehaald (zelfde staat en taal)? Dan hoeven we Cardmarket niet opnieuw te vragen.
+            let key = "\(job.condition?.rawValue ?? "-")|\(language.rawValue)"
+            if let known = fetchedAt[job.productID], known.key == key, Date().timeIntervalSince(known.date) < maxAge,
+               lastListings[job.productID] != nil {
+                done += 1
+                fetched += 1
+                continue
+            }
+            #if DEBUG
+            let t0 = Date()
+            #endif
             loader.load(productID: job.productID, minCondition: job.condition, language: language, loadMore: 1)
             switch await waitForLoader(interactive: interactive) {
             case .cancelled: break loop
             case .needsAttention: needsAttention = true; return fetched
+            case .rateLimited: return fetched
             case .finished: break
             }
+            #if DEBUG
+            NSLog("SEARCH kaart %d/%d %@ status=%@ listings=%d %.1fs | pagina: %@", done + 1, total, job.name.cleanCardName, "\(loader.status)", loader.listings.count, Date().timeIntervalSince(t0), loader.status == .done ? "-" : loader.lastDiagnostic)
+            #endif
             if loader.status == .done {
                 lastListings[job.productID] = loader.listings
+                fetchedAt[job.productID] = (Date(), key)
                 market.recordListings(id: job.productID, minCondition: job.condition, listings: loader.listings)
                 fetched += 1
             }
             done += 1
-            guard await pause(.seconds(1.2)) else { break }
+            guard await pause(.seconds(0.5)) else { break }   // de vaste pauze tussen ladingen regelt RequestGate
+            if breakEvery > 0, fetched > 0, fetched % breakEvery == 0, done < jobs.count {
+                isResting = true
+                let ok = await pause(.seconds(breakSeconds))
+                isResting = false
+                if !ok { break }
+            }
         }
         return fetched
     }

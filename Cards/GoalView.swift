@@ -96,6 +96,9 @@ struct GoalView: View {
                 }
                 Text("De trendschatting telt alle staten en talen mee en ligt voor Engelse \(minCondition.rawValue)-kaarten meestal veel lager. Zoek beste deals voor de echte prijzen.")
                     .font(.caption2).foregroundStyle(.secondary)
+                if RateLimitState.shared.isCoolingDown {
+                    Label(RateLimitState.shared.message, systemImage: "hourglass").font(.caption).foregroundStyle(.orange)
+                }
                 if let addedCount { Text("\(addedCount) kaarten toegevoegd aan je watchlist met een koopjes-melding (\(minCondition.rawValue) of beter).").font(.caption).foregroundStyle(.green) }
                 if cards.isEmpty { Text("De catalogus is nog niet geladen.").font(.caption).foregroundStyle(.orange) }
             }
