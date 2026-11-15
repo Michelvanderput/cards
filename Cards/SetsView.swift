@@ -42,7 +42,22 @@ struct SetsView: View {
 
     var body: some View {
         NavigationStack {
-            List(sets) { set in
+            List {
+                if query.isEmpty {
+                    Section("Verzamelen") {
+                        ForEach(Goal.all) { goal in
+                            NavigationLink(value: GoalRef(id: goal.id)) {
+                                Label {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(goal.title)
+                                        Text(goal.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                    }
+                                } icon: { Image(systemName: goal.icon).foregroundStyle(Theme.accent) }
+                            }
+                        }
+                    }
+                }
+                Section("Sets") { ForEach(sets) { set in
                 NavigationLink(value: set) {
                     HStack(spacing: 12) {
                         SetLogo(set: set)
@@ -51,12 +66,15 @@ struct SetsView: View {
                             Text(subtitle(set)).font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                }
+                } } }
             }
             .overlay { if catalog.items.isEmpty { ProgressView() } }
             .searchable(text: $query, prompt: "Zoek een set")
             .navigationTitle("Sets")
             .navigationDestination(for: SetInfo.self) { SetDetailView(set: $0) }
+            .navigationDestination(for: GoalRef.self) { ref in
+                if let goal = Goal.all.first(where: { $0.id == ref.id }) { GoalView(goal: goal) }
+            }
             .navigationDestination(for: CardItem.self) { DetailView(item: $0) }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {

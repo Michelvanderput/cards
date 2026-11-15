@@ -19,6 +19,15 @@ struct Listing: Identifiable, Hashable {
     var hasPhoto: Bool = false        // verkoper heeft een foto van deze kaart geplaatst
     var comment: String = ""          // opmerking van de verkoper
     var flags: Set<String> = []       // reverse, first, signed, altered, foil
+    var isProfessional: Bool = false  // professionele verkoper
+
+    /// Gegradeerde kaarten (PSA/BGS/CGC...) staan op Cardmarket als gewone staat (meestal NM) met het cijfer in de opmerking.
+    var isGraded: Bool { Self.looksGraded(comment) }
+
+    static func looksGraded(_ text: String) -> Bool {
+        text.range(of: #"\b(psa|bgs|cgc|sgc|ace|tag|ags|pca|gma|beckett)[\s\-:#]*\d|\b(graded|slab|slabbed)\b"#,
+                   options: [.regularExpression, .caseInsensitive]) != nil
+    }
 
     /// Aanbiedingen zijn pas vergelijkbaar bij dezelfde staat én dezelfde variant.
     var variantKey: String { "\(condition)|" + flags.sorted().joined(separator: ",") }
@@ -65,6 +74,9 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
     private var pollTask: Task<Void, Never>?
     private var pendingQuery: [URLQueryItem] = []
     private var languageFilter: LanguageFilter = .defaultValue
+    private var hideGraded = true
+    /// Aantal verborgen gegradeerde aanbiedingen in de laatste lading.
+    private(set) var hiddenGradedCount = 0
     private var generation = 0
 
     override init() {
@@ -75,6 +87,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
 
     func load(productID: Int, minCondition: Condition?, language: LanguageFilter = .defaultValue) {
         languageFilter = language
+        hideGraded = Self.hideGradedSetting
         pollTask?.cancel()
         status = .loading   // oude lijst blijft staan tot de nieuwe binnen is
         var comps = URLComponents(string: "https://www.cardmarket.com/en/Pokemon/Products")!
@@ -115,7 +128,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
           const num=s=>parseFloat(s.replace(/\\./g,'').replace(/[^\\d,]/g,'').replace(',','.'));
           const row=[...document.querySelectorAll('.article-row')].find(r=>{
             const n=(r.querySelector('.seller-name a')||{}).textContent;
-            const p=(r.querySelector('.price-container .color-primary')||{}).textContent||'';
+            const pe=[...r.querySelectorAll('.price-container .color-primary')].find(x=>/\\d/.test(x.textContent)); const p=(pe||{}).textContent||'';
             return n&&n.trim()==='\(name)'&&Math.abs(num(p)-\(price))<0.006;});
           if(!row) return false;
           row.scrollIntoView({block:'center'});
@@ -147,7 +160,9 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
                 let final = (try? await webView.evaluateJavaScript(Self.extractJS) as? String)
                     .flatMap { $0.data(using: .utf8) }
                     .flatMap { try? JSONDecoder().decode(Page.self, from: $0) } ?? page
-                listings = LanguageFilter.apply(languageFilter, to: final.rows.compactMap(Self.parse)).sorted { $0.price < $1.price }
+                let parsed = LanguageFilter.apply(languageFilter, to: final.rows.compactMap(Self.parse))
+                hiddenGradedCount = hideGraded ? parsed.filter(\.isGraded).count : 0
+                listings = (hideGraded ? parsed.filter { !$0.isGraded } : parsed).sorted { $0.price < $1.price }
                 status = .done
                 return
             }
@@ -180,7 +195,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
     }
 
     private struct Page: Decodable {
-        struct Row: Decodable { let cond, lang, price, qty, seller, loc, rating, salesTitle, deliveryTitle, comment: String; let photo: Bool; let flags: [String] }
+        struct Row: Decodable { let cond, lang, price, qty, seller, loc, rating, salesTitle, deliveryTitle, comment: String; let photo: Bool; let flags: [String]; let pro: Bool }
         let title: String
         let challenge: Bool   // Cloudflare-controle (taalonafhankelijk herkend)
         let real: Bool        // echte Cardmarket-productpagina
@@ -198,8 +213,11 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
         return Listing(condition: r.cond, language: r.lang, price: price,
                        quantity: Int(r.qty) ?? 1, seller: r.seller, country: r.loc,
                        sellerRating: r.rating, sales: numbers.first, availableItems: numbers.dropFirst().first,
-                       deliveryDays: days, hasPhoto: r.photo, comment: r.comment, flags: Set(r.flags))
+                       deliveryDays: days, hasPhoto: r.photo, comment: r.comment, flags: Set(r.flags), isProfessional: r.pro)
     }
+
+    /// Standaard verbergen we gegradeerde kaarten: ze vertekenen de markt voor losse kaarten.
+    static var hideGradedSetting: Bool { UserDefaults.standard.object(forKey: "hideGraded") as? Bool ?? true }
 
     private static let loadMoreJS = """
     (function(){const b=document.querySelector('#loadMoreButton');
@@ -209,13 +227,15 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
     private static let extractJS = """
     (function(){
       const t=e=>e&&(e.getAttribute('data-bs-original-title')||e.getAttribute('title'));
+      // Bij professionele verkopers staat voor de prijs een leeg icoon met dezelfde klasse: neem het element mét cijfers.
+      const priceOf=r=>{const e=[...r.querySelectorAll('.price-container .color-primary')].find(x=>/\\d/.test(x.textContent));return e?e.textContent.trim():'';};
       const terms={reverse:['reverse'],first:['first edition','1st edition','erstauflage'],signed:['signed','signiert'],altered:['altered','verändert'],foil:['foil']};
       const flagsOf=r=>{const labels=[...r.querySelectorAll('.product-attributes [aria-label],.product-attributes [data-bs-original-title],.product-attributes [title]')].filter(e=>!e.closest('.product-comments')).map(e=>(e.getAttribute('aria-label')||e.getAttribute('data-bs-original-title')||e.getAttribute('title')||'').toLowerCase().replace(/<[^>]*>/g,''));
         return Object.keys(terms).filter(k=>labels.some(l=>terms[k].some(t=>l.includes(t))));};
       const rows=[...document.querySelectorAll('.article-row')].map(r=>({
         cond:r.querySelector('.article-condition .badge')?.textContent.trim()||'',
         lang:t(r.querySelector('.product-attributes .icon'))||'',
-        price:r.querySelector('.price-container .color-primary')?.textContent.trim()||'',
+        price:priceOf(r),
         qty:r.querySelector('.item-count')?.textContent.trim()||'1',
         seller:r.querySelector('.seller-name a')?.textContent.trim()||'',
         loc:(t(r.querySelector('.seller-name .icon'))||'').replace('Item location: ',''),
@@ -223,6 +243,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
         salesTitle:t(r.querySelector('.sell-count'))||'',
         deliveryTitle:t(r.querySelector('.fonticon-calendar'))||'',
         photo:!!r.querySelector('.fonticon-camera'),
+        pro:[...r.querySelectorAll('[data-bs-original-title],[title]')].some(e=>t(e)==='Professional'),
         comment:(r.querySelector('.product-comments .text-truncate')||r.querySelector('.product-comments'))?.textContent.trim().slice(0,200)||'',
         flags:flagsOf(r)
       }));

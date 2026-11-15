@@ -135,7 +135,7 @@ final class StockReader: NSObject {
         name:first(r,['.col-seller a','a[href*="/Products/Singles/"]']),
         cond:(r.querySelector('.article-condition .badge')||{textContent:''}).textContent.trim(),
         lang:t(r.querySelector('.product-attributes .icon'))||'',
-        price:first(r,['.col-offer .price-container .color-primary','.col-offer .color-primary','.price-container .color-primary']),
+        price:(([...r.querySelectorAll('.price-container .color-primary')].find(x=>/\\d/.test(x.textContent)))||{textContent:''}).textContent.trim(),
         qty:first(r,['.item-count'])||'1',
         comment:first(r,['.product-comments .text-truncate','.product-comments'])
       }));

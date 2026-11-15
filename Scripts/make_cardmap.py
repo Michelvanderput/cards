@@ -17,6 +17,7 @@ cards = [json.loads(l) for l in open(cards_path)]
 def key(s):
     s = s.lower().replace("é", "e").replace("♂", "m").replace("♀", "f")
     s = re.sub(r"\blv\.?\s*\d+\b", "", s)        # "Lv.8" (oude sets)
+    s = re.sub(r"\bδ?\s*delta species\b", "", s)  # Cardmarket plakt "δ Delta Species" achter kaartnamen
     return re.sub(r"[^a-z0-9]", "", s)           # "Dragonite-GX" == "Dragonite GX"
 
 def split_name(n):
@@ -68,29 +69,63 @@ for p in products:
         fuzzy_votes[p["idExpansion"]][set_names[cands[0]["set"]]] += 1
         fuzzy_paths[p["idExpansion"]][set_path(best["img"])] += 1
 
-# --- setnamen en -logo's
+# --- 4. set per expansie via overlap van kaartnamen (robuuster dan stemmen)
+# Voor elke Cardmarket-expansie: welke TCGdex-set bevat de meeste van zijn producten (naam + aanvallen)?
+tc_count = Counter(c["set"] for c in cards)
+set_path_of = {}
+for c in cards:
+    if c["img"]: set_path_of.setdefault(c["set"], set_path(c["img"]))
+cards_by_base = defaultdict(list)
+for c in cards:
+    if c["name"]: cards_by_base[key(c["name"])].append((c["set"], {key(a) for a in c["atk"]}))
+hits = defaultdict(Counter)           # expansie -> set -> aantal producten dat in die set voorkomt
+for p in products:
+    base, tokens = split_name(p["name"])
+    for t in {t for t, atk in cards_by_base.get(base, []) if tokens is None or atk <= tokens}:
+        hits[p["idExpansion"]][t] += 1
+size = Counter(p["idExpansion"] for p in products)
+assign = {}                            # expansie -> (set, aandeel producten, dekking van de set)
+for e, cnt in hits.items():
+    t, h = cnt.most_common(1)[0]
+    if size[e] >= 15 and h / size[e] >= 0.6 and tc_count[t]:
+        assign[e] = (t, h / size[e], h / tc_count[t])
+
+# --- setnamen en -logo's: overlap wint; anders de eerdere stemmen
 sets = {str(e): v.most_common(1)[0][0] for e, v in votes.items()}
 set_paths = {str(e): v.most_common(1)[0][0] for e, v in path_votes.items()}
-size = Counter(p["idExpansion"] for p in products)
 for e, v in fuzzy_votes.items():
     if str(e) in sets: continue
     name, n = v.most_common(1)[0]
     if n >= 5 and n / size[e] >= 0.6:
         sets[str(e)] = name
         set_paths[str(e)] = fuzzy_paths[e].most_common(1)[0][0]
+for e, (t, ratio, cover) in assign.items():
+    sets[str(e)] = set_names[t]
+    if t in set_path_of: set_paths[str(e)] = set_path_of[t]
 
-# Hoofdsets (Engelse set): per setnaam de expansions met minstens 50% exacte koppelingen; heeft een set geen exacte
-# koppelingen, dan het grootste deel. De rest (Japans, promo-delen, andere uitvoeringen) wordt in de app apart gehouden.
-exact_set = set(exact_ids)
-exp_total = Counter(p["idExpansion"] for p in products)
-exp_exact = Counter(p["idExpansion"] for p in products if p["idProduct"] in exact_set)
-by_name = defaultdict(list)
-for e, n in sets.items(): by_name[n].append(int(e))
+# Hoofdset (Engelse uitvoering): per TCGdex-set de expansions met minstens 80% dekking (anders de beste).
+# Japanse en andere uitvoeringen dekken meestal maar een deel en blijven daardoor apart.
+by_set = defaultdict(list)
+for e, (t, ratio, cover) in assign.items(): by_set[t].append((cover, e))
 main = []
-for n, ids in by_name.items():
-    strong = [e for e in ids if exp_exact[e] / exp_total[e] >= 0.5]
-    main += strong if strong else [max(ids, key=lambda e: exp_total[e])]
-main = sorted(main)
+exact_set = set(exact_ids)
+exp_exact = Counter(p["idExpansion"] for p in products if p["idProduct"] in exact_set)
+for t, lst in by_set.items():
+    full = [e for cover, e in lst if cover >= 0.8]
+    if len(full) > 1:
+        # Meerdere expansions dekken de set volledig (bijv. een Japanse uitvoering met dezelfde kaarten):
+        # de exact gekoppelde (Engelse) delen winnen; zonder die: het laagste, oudste expansion-nummer.
+        strong = [e for e in full if exp_exact[e] / size[e] >= 0.3]
+        full = strong if strong else [min(full)]
+    main += full if full else [max(lst)[1]]
+# Benoemde expansions zonder overlap-toewijzing: grootste deel per naam, tenzij de naam al een hoofdset heeft.
+covered = {sets[str(e)] for e in main}
+unassigned = defaultdict(list)
+for e, n in sets.items():
+    if int(e) not in assign: unassigned[n].append(int(e))
+for n, ids in unassigned.items():
+    if n not in covered: main.append(max(ids, key=lambda e: size[e]))
+main = sorted(set(main))
 set_dates = {path: set_dates_by_id[path.rsplit("/", 1)[1]] for path in set(set_paths.values()) if path.rsplit("/", 1)[1] in set_dates_by_id}
 json.dump({"sets": sets, "setPaths": set_paths, "setDates": set_dates, "variants": variants, "main": main,
            "images": {str(k): v for k, v in images.items()}, "exact": exact_ids},

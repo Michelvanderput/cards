@@ -365,3 +365,138 @@ final class VariantGroupingTests: XCTestCase {
         XCTAssertEqual(c.cards(in: set, grouped: false).count, 4)
     }
 }
+
+@MainActor
+final class GoalAndDataTests: XCTestCase {
+    func testPokemonExNamePattern() {
+        let yes = ["Mewtwo ex [Energy Absorption | Psyburn]", "Altaria ex δ Delta Species [Extra Boost | Healing Light]",
+                   "Rocket's Mewtwo ex [Energy Absorption | Psyburn]", "Latias ex", "Exploud ex [Extra Noise | Derail]"]
+        let no = ["Exploud [Extra Noise]", "Exeggutor [Stomp]", "Charizard [Fire Spin]", "Professor Elm", "Mewtwo EX Legendary"]
+        yes.forEach { XCTAssertTrue(GoalFilter.isPokemonEx($0), $0) }
+        // "Mewtwo EX Legendary" bevat een los woord EX; hoort bij de moderne tijd en wordt door de seriefilter uitgesloten.
+        no.dropLast().forEach { XCTAssertFalse(GoalFilter.isPokemonEx($0), $0) }
+    }
+
+    func testShippedMapHasAllSixteenExEraSets() throws {
+        let map = CardMap.load()
+        let expected = ["Ruby & Sapphire", "Sandstorm", "Dragon", "Team Magma vs Team Aqua", "Hidden Legends", "FireRed & LeafGreen",
+                        "Team Rocket Returns", "Deoxys", "Emerald", "Unseen Forces", "Delta Species", "Legend Maker",
+                        "Holon Phantoms", "Crystal Guardians", "Dragon Frontiers", "Power Keepers"]
+        let ids = Array(1539...1554)
+        XCTAssertEqual(ids.map { map.sets[$0] }.compactMap { $0 }.count, 16, "alle 16 EX-era sets moeten een naam hebben")
+        XCTAssertEqual(Set(ids.compactMap { map.sets[$0] }), Set(expected))
+        XCTAssertTrue(ids.allSatisfy { map.main.contains($0) }, "alle 16 moeten Engelse hoofdsets zijn")
+        XCTAssertTrue(ids.allSatisfy { map.setPaths[$0]?.hasPrefix("en/ex/") == true })
+        let dates = try ids.map { try XCTUnwrap(map.releaseDate(expansion: $0)) }
+        XCTAssertEqual(dates, dates.sorted(), "releasedata moeten oplopen van 2003 naar 2007")
+        XCTAssertGreaterThan(map.variants.count, 5000)
+        XCTAssertGreaterThan(map.sets.count, 450)
+    }
+
+    func testGoalSelectsOnlyEnglishExEraPokemonEx() {
+        func item(_ id: Int, _ exp: Int, _ name: String) -> CardItem {
+            CardItem(id: id, name: name, expansionId: exp, metaID: nil, normal: PriceSet(), holo: PriceSet())
+        }
+        let items = [
+            item(1, 1539, "Mewtwo ex [Energy Absorption | Psyburn]"),      // EX-era ex ✓
+            item(2, 1539, "Chansey [Healing Egg]"),                        // geen ex
+            item(3, 1553, "Altaria ex δ Delta Species [Extra Boost]"),     // ex ✓ (Dragon Frontiers)
+            item(4, 6134, "Pikachu ex [Spark]"),                           // moderne ex, niet in de EX-era
+            item(5, 5877, "Mewtwo ex [Energy Absorption | Psyburn]"),      // andere uitvoering van Ruby & Sapphire
+        ]
+        let store = CatalogStore()
+        store.load(snapshot: Snapshot(fetchedAt: Date(), items: items), map: CardMap.load())
+        XCTAssertEqual(store.goalCards(.exEra).map(\.id), [1, 3])
+    }
+
+    func testPriceSanityFallsBackToAverage() {
+        // Echte afwijking uit de prijsgids: Chansey ex (EX Ruby & Sapphire).
+        var chansey = CardItem(id: 1, name: "Chansey ex", expansionId: 1, metaID: nil, normal: PriceSet(), holo: PriceSet())
+        chansey.normal = PriceSet(avg: 47.59, low: 4, trend: 0.02, avg1: 27.5, avg7: 25.55, avg30: 59.95)
+        XCTAssertEqual(chansey.mainPrice ?? 0, 25.55, accuracy: 0.001)
+        XCTAssertTrue(chansey.priceIsUncertain)
+
+        var normal = chansey; normal.normal = PriceSet(avg: 10, low: 8, trend: 11, avg1: nil, avg7: 10.5, avg30: 10)
+        XCTAssertEqual(normal.mainPrice, 11)
+        XCTAssertFalse(normal.priceIsUncertain)
+
+        var noRef = chansey; noRef.normal = PriceSet(avg: nil, low: nil, trend: 5, avg1: nil, avg7: nil, avg30: nil)
+        XCTAssertEqual(noRef.mainPrice, 5)
+
+        var absurd = chansey; absurd.normal = PriceSet(avg: 150, low: nil, trend: 24261, avg1: nil, avg7: nil, avg30: nil)
+        XCTAssertEqual(absurd.mainPrice, 150)
+    }
+}
+
+final class RealPageLearningsTests: XCTestCase {
+    func testGradedDetectionOnRealComments() {
+        // Opmerkingen van echte aanbiedingen (Mewtwo ex, EX Ruby & Sapphire).
+        ["PSA6", "PSA 7", "[BGS 9.0]", "PSA 8 - New Cert - Ask for pics", "PSA 8", "CGC 9.5", "graded slab", "Beckett 9"]
+            .forEach { XCTAssertTrue(Listing.looksGraded($0), $0) }
+        ["DM for more photo's!", "AP 7", "", "Near mint, sleeved immediately", "Ace Spec trainer", "tag team card", "Stored in a binder"]
+            .forEach { XCTAssertFalse(Listing.looksGraded($0), $0) }
+    }
+
+    func testGradedListingFlagFollowsComment() {
+        var l = Listing(condition: "NM", language: "English", price: 1500, quantity: 1, seller: "x", country: "Spain")
+        XCTAssertFalse(l.isGraded)
+        l.comment = "PSA 8"
+        XCTAssertTrue(l.isGraded)
+    }
+}
+
+@MainActor
+final class RealListingFixtureTests: XCTestCase {
+    /// De 7 echte aanbiedingen van Mewtwo ex (EX Ruby & Sapphire) zoals gelezen op Cardmarket op 15 nov 2026 (NM of beter, Engels).
+    private func realListings() -> [Listing] {
+        func l(_ price: Double, _ seller: String, _ country: String, _ rating: String, _ sales: Int, _ comment: String, photo: Bool, pro: Bool = false) -> Listing {
+            Listing(condition: "NM", language: "English", price: price, quantity: 1, seller: seller, country: country,
+                    sellerRating: rating, sales: sales, availableItems: nil, deliveryDays: nil, hasPhoto: photo, comment: comment,
+                    flags: [], isProfessional: pro)
+        }
+        return [l(600, "Beyerinos", "Netherlands", "none", 0, "DM for more photo's!", photo: true),
+                l(900, "caspercor", "Denmark", "good", 19, "AP 7", photo: true),
+                l(1500, "NivelinaBB", "Spain", "none", 0, "PSA6", photo: false),
+                l(1799, "gregerdidrik", "Sweden", "good", 32, "PSA 7", photo: false),
+                l(3000, "GS-GameOn", "Italy", "outstanding", 29185, "[BGS 9.0]", photo: false, pro: true),
+                l(3300, "assetexchange", "Denmark", "none", 3, "PSA 8 - New Cert - Ask for pics", photo: true, pro: true),
+                l(3349, "pokeschins", "Netherlands", "outstanding", 77, "PSA 8", photo: true)]
+    }
+
+    private func settings() -> AppSettings { AppSettings(defaults: UserDefaults(suiteName: "cards-tests-\(UUID().uuidString)")!) }
+
+    func testGradedSlabsAreRemovedFromRealPage() {
+        let raw = realListings().filter { !$0.isGraded }
+        XCTAssertEqual(raw.map(\.seller), ["Beyerinos", "caspercor"])
+    }
+
+    func testTrendIsIgnoredWhenItDoesNotMatchTheListings() {
+        // Echte situatie: trend (alle staten) €331, maar de goedkoopste losse NM-kaarten kosten €600–900.
+        let raw = realListings().filter { !$0.isGraded }
+        let scores = DealEngine.analyze(raw, settings: settings(), tcgplayerEUR: nil, trend: 330.62)
+        let beyerinos = scores[raw[0].id]!
+        XCTAssertNil(beyerinos.reference, "de trend past niet bij de aanbiedingen en mag niet als referentie dienen")
+        XCTAssertEqual(beyerinos.level, .fair)          // neutraal: geen onterecht 'Duur'
+        XCTAssertNil(beyerinos.advice)
+    }
+
+    func testTrendIsUsedWhenItMatchesTheListings() {
+        let raw = realListings().filter { !$0.isGraded }
+        let scores = DealEngine.analyze(raw, settings: settings(), tcgplayerEUR: nil, trend: 700)
+        let beyerinos = scores[raw[0].id]!
+        XCTAssertNotNil(beyerinos.reference)
+        XCTAssertTrue(beyerinos.factors.contains { $0.text.contains("Cardmarket-trend") })
+    }
+
+    func testWithoutAnyReferenceNothingCrashes() {
+        let one = [realListings()[0]]
+        let scores = DealEngine.analyze(one, settings: settings(), tcgplayerEUR: nil, trend: nil)
+        XCTAssertNil(scores[one[0].id]?.reference)
+        XCTAssertEqual(scores[one[0].id]?.level, .fair)
+    }
+
+    func testCountriesFromRealListingsHaveOfficialShipping() {
+        let s = settings()
+        for l in realListings() { XCTAssertNotNil(s.quote(from: l.country, price: l.price), l.country) }
+    }
+}

@@ -55,13 +55,22 @@ enum DealEngine {
             medians[cond] = DealAnalyzer.percentile(items.compactMap { totals[$0.id] }.sorted(), 0.5)
         }
         let overall = listings.count >= 4 ? DealAnalyzer.percentile(totals.values.sorted(), 0.5) : nil
+        // De Cardmarket-trend telt alle staten en talen mee en ligt voor Engelse NM-kaarten vaak ver onder de echte prijzen.
+        // Daarom gebruiken we hem alleen als terugval als hij ongeveer past bij wat er echt te koop is (0,5× tot 2× de mediaan).
+        let trendFallback: Double? = {
+            guard let trend, trend > 0, !listings.isEmpty else { return nil }
+            let med = DealAnalyzer.percentile(listings.map(\.price).sorted(), 0.5)
+            return (trend >= 0.5 * med && trend <= 2 * med) ? trend : nil
+        }()
 
         var out: [UUID: DealScore] = [:]
         for l in listings {
             let quote = settings.quote(from: l.country, price: l.price)
             let ship = quote?.price ?? 0
             let total = totals[l.id] ?? l.price
-            let ref = medians[l.variantKey] ?? medians[l.condition] ?? overall
+            let marketRef = medians[l.variantKey] ?? medians[l.condition] ?? overall
+            // Te weinig aanbiedingen om onderling te vergelijken (bij zeldzame kaarten): vergelijk met de Cardmarket-trend.
+            let ref = marketRef ?? trendFallback.map { $0 + ship }
             var factors: [DealScore.Factor] = []
             var score = 50.0
 
@@ -76,6 +85,9 @@ enum DealEngine {
                 }
             } else {
                 factors.append(.init(text: "Te weinig aanbiedingen om te vergelijken", positive: nil))
+            }
+            if marketRef == nil, ref != nil {
+                factors.append(.init(text: "Weinig aanbiedingen: vergeleken met de Cardmarket-trend (alle staten)", positive: nil))
             }
 
             // Variant
@@ -106,6 +118,7 @@ enum DealEngine {
             case "bad", "poor": score -= 8; factors.append(.init(text: "Verkoper: slecht", positive: false))
             default: break
             }
+            if l.isProfessional { factors.append(.init(text: "Professionele verkoper", positive: nil)) }
             if let n = l.sales {
                 if n < 10 { score -= 6; factors.append(.init(text: "Nieuwe verkoper (\(n) verkopen)", positive: false)) }
                 else if n >= 500 { score += 3; factors.append(.init(text: "Ervaren verkoper (\(n.formatted()) verkopen)", positive: true)) }

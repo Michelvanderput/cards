@@ -4,6 +4,7 @@ struct SettingsView: View {
     @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .defaultValue
     @AppStorage("autoCheck") private var autoCheck = true
     @AppStorage("groupVariants") private var groupVariants = true
+    @AppStorage("hideGraded") private var hideGraded = true
     @Environment(CatalogStore.self) private var catalog
     @Environment(AppSettings.self) private var settings
     @Environment(CardmarketSession.self) private var session
@@ -41,8 +42,9 @@ struct SettingsView: View {
                     Picker("Taal", selection: $languageFilter) {
                         ForEach(LanguageFilter.allCases) { Text($0.label).tag($0) }
                     }
+                    Toggle("Gegradeerde kaarten verbergen", isOn: $hideGraded)
                 } header: { Text("Aanbiedingen") } footer: {
-                    Text("Met \"Alleen Engels\" ziet de app alleen Engelse aanbiedingen. Dat geldt ook voor dealscores, marktstatistieken, alerts en bundelen.")
+                    Text("Met \"Alleen Engels\" ziet de app alleen Engelse aanbiedingen. Gegradeerde kaarten (PSA, BGS, CGC...) staan op Cardmarket als gewone staat met het cijfer in de opmerking; de app verbergt ze zodat ze de markt voor losse kaarten niet vertekenen. Beide gelden ook voor dealscores, marktstatistieken, alerts en bundelen.")
                 }
 
                 Section {

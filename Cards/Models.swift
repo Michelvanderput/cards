@@ -8,6 +8,13 @@ struct PriceSet: Codable, Hashable {
     var avg7: Double?
     var avg30: Double?
 
+    /// Trend, of bij een onwaarschijnlijke trend (minder dan 25% of meer dan 4× het gemiddelde) dat gemiddelde.
+    var saneTrend: (value: Double?, uncertain: Bool) {
+        guard let t = trend else { return (nil, false) }
+        guard let ref = avg7 ?? avg30 ?? avg, ref > 0 else { return (t, false) }
+        return (t >= 0.25 * ref && t <= 4 * ref) ? (t, false) : (ref, true)
+    }
+
     var isEmpty: Bool { [avg, low, trend, avg1, avg7, avg30].allSatisfy { $0 == nil } }
 }
 
@@ -19,8 +26,18 @@ struct CardItem: Identifiable, Codable, Hashable {
     var normal: PriceSet
     var holo: PriceSet
 
-    /// Hoofdprijs: de Cardmarket-trendprijs (EUR).
-    var mainPrice: Double? { normal.trend ?? holo.trend ?? normal.avg ?? holo.avg }
+    /// Hoofdprijs: de Cardmarket-trendprijs (EUR), tenzij die niet in verhouding staat tot het 7-daags gemiddelde.
+    /// De prijsgids bevat soms een onzinnige trend (bijv. €0,02 bij een gemiddelde van €47); dan gebruiken we het gemiddelde.
+    var mainPrice: Double? {
+        if normal.trend != nil { return normal.saneTrend.value }
+        if holo.trend != nil { return holo.saneTrend.value }
+        return normal.avg ?? holo.avg
+    }
+
+    /// De trendprijs wijkt sterk af van het gemiddelde; de getoonde prijs is dan het 7-daags gemiddelde.
+    var priceIsUncertain: Bool {
+        (normal.trend != nil ? normal.saneTrend.uncertain : holo.saneTrend.uncertain)
+    }
 
     /// Prijsverandering: trend t.o.v. het 7-daags gemiddelde (positief = gestegen).
     var weekChange: Double? {

@@ -62,6 +62,10 @@ struct DetailView: View {
             }
             Section {
                 LabeledContent("Cardmarket (trend, alle staten)", value: euro(current.mainPrice))
+                if current.priceIsUncertain {
+                    Label("De trend in de prijsgids wijkt sterk af van het gemiddelde. De app toont daarom het 7-daags gemiddelde.", systemImage: "exclamationmark.triangle")
+                        .font(.footnote).foregroundStyle(.orange)
+                }
                 if let tcg = market.tcgplayerEUR(item.id) {
                     LabeledContent("TCGplayer (marktprijs, VS)", value: euro(tcg))
                     if let cm = current.mainPrice, tcg > 0 {

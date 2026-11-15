@@ -88,6 +88,7 @@ final class ConditionChecker {
                 if !interactive && loader.status == .needsCheck { loader.stop(); needsAttention = true; return }
             }
             if loader.status == .done {
+                lastListings[job.productID] = loader.listings
                 market.recordListings(id: job.productID, minCondition: job.condition, listings: loader.listings)
             }
             done += 1
