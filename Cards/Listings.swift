@@ -99,13 +99,13 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
                 status = .done
                 return
             }
-            if page.title.contains("Just a moment") {
+            if page.challenge {
                 status = .needsCheck
                 emptyStreak = 0
             } else {
                 status = .loading
-                if !webView.isLoading { emptyStreak += 1 }
-                // Pagina geladen maar geen aanbiedingen: waarschijnlijk geen resultaat voor dit filter.
+                // Alleen een echte productpagina zonder aanbiedingen telt als "geen resultaat voor dit filter".
+                if page.real && !webView.isLoading { emptyStreak += 1 }
                 if emptyStreak >= 8 { listings = []; status = .done; return }
             }
         }
@@ -130,6 +130,8 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
     private struct Page: Decodable {
         struct Row: Decodable { let cond, lang, price, qty, seller, loc: String }
         let title: String
+        let challenge: Bool   // Cloudflare-controle (taalonafhankelijk herkend)
+        let real: Bool        // echte Cardmarket-productpagina
         let rows: [Row]
     }
 
@@ -158,7 +160,10 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
         seller:r.querySelector('.seller-name a')?.textContent.trim()||'',
         loc:(t(r.querySelector('.seller-name .icon'))||'').replace('Item location: ','')
       }));
-      return JSON.stringify({title:document.title,rows:rows});
+      const challenge=!!document.querySelector('script[src*="challenge-platform"],#challenge-error-text,.cf-turnstile,#cf-chl-widget,#challenge-form')
+        || /just a moment|even geduld|un instant|einen moment|un momento/i.test(document.title);
+      const real=!challenge && !!document.querySelector('.table-body,#tabContent-info,.page-title-container');
+      return JSON.stringify({title:document.title,challenge:challenge,real:real,rows:rows});
     })()
     """
 }
