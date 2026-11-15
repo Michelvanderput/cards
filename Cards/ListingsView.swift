@@ -391,7 +391,9 @@ struct PhotoCheckSheet: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Klaar") { dismiss() } } }
             .task {
                 loader.load(productID: item.id, minCondition: Condition(rawValue: listing.condition), language: language)
-                while loader.isPolling { try? await Task.sleep(for: .milliseconds(500)) }
+                while loader.isPolling {
+                    do { try await Task.sleep(for: .milliseconds(500)) } catch { loader.stop(); return }
+                }
                 found = await loader.highlight(seller: listing.seller, price: listing.price)
             }
             .onDisappear { loader.stop() }

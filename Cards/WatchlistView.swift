@@ -98,19 +98,27 @@ struct CheckSheet: View {
     @Environment(ConditionChecker.self) private var checker
     @Environment(\.dismiss) private var dismiss
 
+    private func eta(_ t: TimeInterval) -> String {
+        t < 90 ? "nog ongeveer \(Int(t.rounded())) sec" : "nog ongeveer \(Int((t / 60).rounded())) min"
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 10) {
                 if checker.isRunning {
                     ProgressView(value: Double(checker.done), total: Double(max(checker.total, 1)))
-                    Text("Controleer \(checker.current ?? "…") (\(checker.done + 1) van \(checker.total))")
+                    Text("Controleer \(checker.current?.cleanCardName ?? "…") (\(min(checker.done + 1, checker.total)) van \(checker.total))")
                         .font(.footnote).foregroundStyle(.secondary)
+                    if let remaining = checker.remainingEstimate {
+                        Text(eta(remaining)).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Button("Stop", role: .destructive) { checker.cancel() }.buttonStyle(.bordered)
                 } else {
-                    Text(checker.total == 0 ? "Klaar om te starten." : "Klaar. Alerts zijn bijgewerkt.")
+                    Text(checker.total == 0 ? "Klaar om te starten." : "Klaar: \(checker.done) van \(checker.total) kaarten gecontroleerd.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 if checker.needsCheckNow {
-                    Text("Cardmarket vraagt een beveiligingscontrole. Vink 'Verify you are human' hieronder zelf aan.")
+                    Text("Cardmarket vraagt een beveiligingscontrole. Vink 'Verify you are human' hieronder zelf aan. De zoektocht gaat daarna vanzelf verder.")
                         .font(.footnote).foregroundStyle(.orange)
                 }
                 WebViewHost(webView: checker.loader.webView)
@@ -128,6 +136,7 @@ struct CheckSheet: View {
                 }
             }
             .task { await start() }
+            .onDisappear { checker.cancel() }   // sluiten van het scherm stopt de zoektocht netjes
         }
         #if os(macOS)
         .frame(minWidth: 520, minHeight: 520)

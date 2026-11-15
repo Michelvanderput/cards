@@ -13,40 +13,113 @@ final class ConditionChecker {
     private(set) var done = 0
     private(set) var total = 0
     private(set) var needsAttention = false
-    /// Laatst geladen aanbiedingen per kaart (voor de bundelweergave).
+    private(set) var startedAt: Date?
+    /// Laatst geladen aanbiedingen per kaart (voor de bundelweergave en beste deals).
     private(set) var lastListings: [Int: [Listing]] = [:]
     private var lastAttentionNotice: Date?
+    private var cancelRequested = false
 
     var needsCheckNow: Bool { loader.status == .needsCheck }
 
-    /// - Parameter interactive: true = de gebruiker kijkt mee en kan een beveiligingscontrole aantikken.
-    func run(watch: WatchStore, language: LanguageFilter, market: MarketStore? = nil, settings: AppSettings, catalog: CatalogStore,
-             interactive: Bool, minimumAge: TimeInterval = 0) async {
-        guard !isRunning else { return }
-        let due = watch.conditionEntries.filter {
-            minimumAge == 0 || $0.lastChecked.map { Date().timeIntervalSince($0) > minimumAge } ?? true
+    /// Geschatte resterende tijd op basis van de snelheid tot nu toe.
+    var remainingEstimate: TimeInterval? {
+        guard isRunning, done > 0, let startedAt else { return nil }
+        let perItem = Date().timeIntervalSince(startedAt) / Double(done)
+        return perItem * Double(max(total - done, 0))
+    }
+
+    // MARK: - Annuleren
+
+    /// Stopt de lopende controle (Stop-knop, sluiten van het scherm of een nieuwe handmatige taak).
+    func cancel() {
+        cancelRequested = true
+        loader.stop()
+    }
+
+    /// Een handmatige taak neemt het over van een lopende (bijvoorbeeld de automatische controle op de achtergrond).
+    private func preemptRunningJob() async {
+        guard isRunning else { return }
+        cancel()
+        for _ in 0..<50 where isRunning {
+            guard await pause(.milliseconds(100), honoringCancel: false) else { return }
         }
-        guard !due.isEmpty else { return }
+    }
+
+    /// Pauze die bij annuleren meteen stopt (geen `try?`: een genegeerde annulering laat een lus doordraaien
+    /// zonder te wachten en blokkeert dan de hele app). Geeft false terug als er geannuleerd is.
+    private func pause(_ duration: Duration, honoringCancel: Bool = true) async -> Bool {
+        do { try await Task.sleep(for: duration) } catch { return false }
+        return !(honoringCancel && (Task.isCancelled || cancelRequested))
+    }
+
+    private enum Wait { case finished, cancelled, needsAttention }
+
+    /// Wacht tot de aanbieding is geladen. Stopt meteen bij annuleren.
+    private func waitForLoader(interactive: Bool) async -> Wait {
+        while loader.isPolling {
+            if Task.isCancelled || cancelRequested { loader.stop(); return .cancelled }
+            do { try await Task.sleep(for: .milliseconds(400)) } catch { loader.stop(); return .cancelled }
+            if !interactive && loader.status == .needsCheck { loader.stop(); return .needsAttention }
+        }
+        return (Task.isCancelled || cancelRequested) ? .cancelled : .finished
+    }
+
+    private func begin(total: Int) {
         isRunning = true
+        cancelRequested = false
         needsAttention = false
-        total = due.count
+        self.total = total
         done = 0
-        defer { isRunning = false; current = nil }
+        startedAt = Date()
+    }
+
+    private func end() {
+        isRunning = false
+        current = nil
+        startedAt = nil
+    }
+
+    // MARK: - Alerts per staat en koopjes (watchlist)
+
+    /// Welke kaarten er aan de beurt zijn: alleen wat lang genoeg geleden is gecontroleerd, de langst niet-gecontroleerde eerst,
+    /// en hooguit `maxEntries` (zodat een lange watchlist niet in één keer de hele app en Cardmarket bezighoudt).
+    static func selectDue(_ entries: [WatchEntry], minimumAge: TimeInterval, maxEntries: Int?, now: Date = Date()) -> [WatchEntry] {
+        var due = entries.filter { minimumAge == 0 || $0.lastChecked.map { now.timeIntervalSince($0) > minimumAge } ?? true }
+        if let maxEntries {
+            due = Array(due.sorted { ($0.lastChecked ?? .distantPast) < ($1.lastChecked ?? .distantPast) }.prefix(maxEntries))
+        }
+        return due
+    }
+
+    /// - Parameters:
+    ///   - interactive: true = de gebruiker kijkt mee en kan een beveiligingscontrole aantikken; neemt een lopende taak over.
+    ///   - maxEntries: begrenst het aantal kaarten per ronde (de langst niet gecontroleerde eerst); voor automatische rondes.
+    func run(watch: WatchStore, language: LanguageFilter, market: MarketStore? = nil, settings: AppSettings, catalog: CatalogStore,
+             interactive: Bool, minimumAge: TimeInterval = 0, maxEntries: Int? = nil) async {
+        if isRunning {
+            guard interactive else { return }
+            await preemptRunningJob()
+            if isRunning { return }
+        }
+        let due = Self.selectDue(watch.conditionEntries, minimumAge: minimumAge, maxEntries: maxEntries)
+        guard !due.isEmpty else { return }
+        begin(total: due.count)
+        defer { end() }
 
         var deals: [Notice] = []
-        for entry in due {
+        loop: for entry in due {
+            if Task.isCancelled || cancelRequested { break }
             let cond = entry.minCondition
             current = entry.name
-            loader.load(productID: entry.id, minCondition: cond, language: language)
-            while loader.isPolling {
-                try? await Task.sleep(for: .milliseconds(500))
-                if !interactive && loader.status == .needsCheck {
-                    loader.stop()
-                    needsAttention = true
-                    await watch.sendDeals(deals)
-                    await noticeAttention()
-                    return
-                }
+            loader.load(productID: entry.id, minCondition: cond, language: language, loadMore: 1)
+            switch await waitForLoader(interactive: interactive) {
+            case .cancelled: break loop
+            case .needsAttention:
+                needsAttention = true
+                await watch.sendDeals(deals)
+                await noticeAttention()
+                return
+            case .finished: break
             }
             if loader.status == .done {
                 let listings = loader.listings
@@ -72,34 +145,45 @@ final class ConditionChecker {
                 }
             }
             done += 1
-            try? await Task.sleep(for: .seconds(3))   // rustig aan: één kaart tegelijk, met pauze
+            guard await pause(.seconds(2)) else { break }   // rustig aan: één kaart tegelijk, met pauze
         }
         await watch.sendDeals(deals)
     }
 
-    /// Haalt de aanbiedingen op voor een lijst kaarten (bijv. je verkoopaanbod) en bewaart de marktstatistieken.
+    // MARK: - Marktcheck voor willekeurige kaarten (verkoopaanbod, beste deals van een doel)
+
+    /// Haalt de aanbiedingen op voor een lijst kaarten en bewaart de marktstatistieken en aanbiedingen.
+    /// Geeft het aantal kaarten terug dat daadwerkelijk is opgehaald.
+    @discardableResult
     func refreshMarket(jobs: [(productID: Int, name: String, condition: Condition?)], language: LanguageFilter,
-                       market: MarketStore, interactive: Bool) async {
-        guard !isRunning, !jobs.isEmpty else { return }
-        isRunning = true
-        needsAttention = false
-        total = jobs.count
-        done = 0
-        defer { isRunning = false; current = nil }
-        for job in jobs {
+                       market: MarketStore, interactive: Bool) async -> Int {
+        guard !jobs.isEmpty else { return 0 }
+        if isRunning {
+            guard interactive else { return 0 }
+            await preemptRunningJob()
+            if isRunning { return 0 }
+        }
+        begin(total: jobs.count)
+        defer { end() }
+        var fetched = 0
+        loop: for job in jobs {
+            if Task.isCancelled || cancelRequested { break }
             current = job.name
-            loader.load(productID: job.productID, minCondition: job.condition, language: language)
-            while loader.isPolling {
-                try? await Task.sleep(for: .milliseconds(500))
-                if !interactive && loader.status == .needsCheck { loader.stop(); needsAttention = true; return }
+            loader.load(productID: job.productID, minCondition: job.condition, language: language, loadMore: 1)
+            switch await waitForLoader(interactive: interactive) {
+            case .cancelled: break loop
+            case .needsAttention: needsAttention = true; return fetched
+            case .finished: break
             }
             if loader.status == .done {
                 lastListings[job.productID] = loader.listings
                 market.recordListings(id: job.productID, minCondition: job.condition, listings: loader.listings)
+                fetched += 1
             }
             done += 1
-            try? await Task.sleep(for: .seconds(3))
+            guard await pause(.seconds(1.2)) else { break }
         }
+        return fetched
     }
 
     private func noticeAttention() async {

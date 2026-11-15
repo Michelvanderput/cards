@@ -149,7 +149,8 @@ struct CardsApp: App {
     private func refreshAll() async {
         await refreshPrices()
         if autoCheck {
-            await checker.run(watch: watch, language: languageFilter, market: market, settings: appSettings, catalog: catalog, interactive: false, minimumAge: 15 * 60)
+            await checker.run(watch: watch, language: languageFilter, market: market, settings: appSettings, catalog: catalog,
+                                interactive: false, minimumAge: 3 * 3600, maxEntries: 12)
         }
     }
 

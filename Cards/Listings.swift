@@ -75,6 +75,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
     private var pendingQuery: [URLQueryItem] = []
     private var languageFilter: LanguageFilter = .defaultValue
     private var hideGraded = true
+    private var maxLoadMore = 3
     /// Aantal verborgen gegradeerde aanbiedingen in de laatste lading.
     private(set) var hiddenGradedCount = 0
     private var generation = 0
@@ -85,8 +86,9 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
         webView.navigationDelegate = self
     }
 
-    func load(productID: Int, minCondition: Condition?, language: LanguageFilter = .defaultValue) {
+    func load(productID: Int, minCondition: Condition?, language: LanguageFilter = .defaultValue, loadMore: Int = 3) {
         languageFilter = language
+        maxLoadMore = loadMore
         hideGraded = Self.hideGradedSetting
         pollTask?.cancel()
         status = .loading   // oude lijst blijft staan tot de nieuwe binnen is
@@ -142,6 +144,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
     private func poll(_ gen: Int) async {
         defer { if gen == generation { isPolling = false } }
         var emptyStreak = 0
+        var loadingTicks = 0      // seconden zonder resultaat en zonder beveiligingscontrole
         for _ in 0..<120 {
             if Task.isCancelled { return }
             try? await Task.sleep(for: .seconds(1))
@@ -151,7 +154,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
                   let page = try? JSONDecoder().decode(Page.self, from: data) else { continue }
             if !page.rows.isEmpty {
                 // Laad een paar extra blokken aanbiedingen, zodat ook duurdere staten erbij komen.
-                for _ in 0..<3 {
+                for _ in 0..<maxLoadMore {
                     let clicked = (try? await webView.evaluateJavaScript(Self.loadMoreJS)) as? Bool ?? false
                     if !clicked { break }
                     try? await Task.sleep(for: .seconds(1.5))
@@ -171,6 +174,8 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
                 emptyStreak = 0
             } else {
                 status = .loading
+                loadingTicks += 1
+                if loadingTicks >= 40 { break }   // pagina laadt niet: sla deze kaart over in plaats van minutenlang te wachten
                 // Alleen een echte productpagina zonder aanbiedingen telt als "geen resultaat voor dit filter".
                 if page.real && !webView.isLoading { emptyStreak += 1 }
                 if emptyStreak >= 8 { listings = []; status = .done; return }
