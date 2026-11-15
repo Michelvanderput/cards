@@ -29,7 +29,10 @@ struct Binder: Identifiable, Codable, Hashable {
 final class BinderStore {
     private(set) var binders: [Binder] = []
 
-    init() { load() }
+    private let storage: URL?
+
+    /// - Parameter storage: map voor het opslagbestand (alleen voor tests); standaard de app-map.
+    init(storage: URL? = nil) { self.storage = storage; load() }
 
     func binder(_ id: UUID) -> Binder? { binders.first { $0.id == id } }
 
@@ -79,7 +82,7 @@ final class BinderStore {
     // MARK: - Opslag
 
     private var fileURL: URL {
-        let dir = URL.applicationSupportDirectory.appending(path: "Cards", directoryHint: .isDirectory)
+        let dir = storage ?? URL.applicationSupportDirectory.appending(path: "Cards", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appending(path: "binders.json")
     }

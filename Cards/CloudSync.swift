@@ -87,6 +87,7 @@ final class CloudSync {
         let lastLocal = UserDefaults.standard.double(forKey: key + ".local")
         let lastRemote = UserDefaults.standard.double(forKey: key + ".remote")
 
+        let baseURL = localDir.appending(path: "sync-base", directoryHint: .isDirectory).appending(path: file)
         let outcome: Result<(Action, Data?), Error> = await Task.detached {
             do {
                 let fm = FileManager.default
@@ -102,14 +103,15 @@ final class CloudSync {
                 case .push:
                     let data = try Data(contentsOf: local)
                     try Self.coordinatedWrite(data, to: remote)
-                    return .success((.push, nil))
+                    return .success((.push, data))
                 case .pull:
                     let data = try Self.coordinatedRead(remote)
                     try data.write(to: local, options: .atomic)
                     return .success((.pull, data))
                 case .merge:
                     let l = try Data(contentsOf: local), r = try Self.coordinatedRead(remote)
-                    guard let merged = SyncMerge.merge(file: file, local: l, remote: r) else { return .success((.pull, r)) }
+                    let base = try? Data(contentsOf: baseURL)
+                    guard let merged = SyncMerge.merge(file: file, local: l, remote: r, base: base) else { return .success((.pull, r)) }
                     try merged.write(to: local, options: .atomic)
                     try Self.coordinatedWrite(merged, to: remote)
                     return .success((.merge, merged))
@@ -120,8 +122,13 @@ final class CloudSync {
         switch outcome {
         case .failure(let error):
             status = .failed(error.localizedDescription)
-        case .success(let (action, _)):
+        case .success(let (action, aligned)):
             guard action != .none else { return }
+            // De afgestemde inhoud is de basis voor de volgende samenvoeging (om verwijderingen te herkennen).
+            if let aligned {
+                try? FileManager.default.createDirectory(at: baseURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? aligned.write(to: baseURL, options: .atomic)
+            }
             // Onthoud de datums na afstemmen, zodat we onze eigen wijziging niet opnieuw oppakken.
             let ld = (try? local.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)?.timeIntervalSince1970 ?? 0
             let rd = (try? remote.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)?.timeIntervalSince1970 ?? 0

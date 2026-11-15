@@ -32,7 +32,37 @@ struct CardsApp: App {
         URLCache.shared = URLCache(memoryCapacity: 64 << 20, diskCapacity: 400 << 20)
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
         Task.detached(priority: .utility) { await ImageStore.shared.prune() }
+        #if DEBUG
+        if CommandLine.arguments.contains("--selftest-notifications") { Self.selfTestNotifications() }
+        #endif
     }
+
+    #if DEBUG
+    /// Alleen voor ontwikkeling: meldt of meldingen zijn toegestaan en of een melding echt aankomt. Vraagt zelf geen toestemming.
+    private static func selfTestNotifications() {
+        Task { @MainActor in
+            let status = await WatchStore.authorizationStatus()
+            NSLog("SELFTEST status=%@ allowed=%d", NotificationSupport.describe(status), NotificationSupport.isAllowed(status) ? 1 : 0)
+            if NotificationSupport.isAllowed(status) {
+                let center = UNUserNotificationCenter.current()
+                let existing = await center.deliveredNotifications()
+                let titles = Dictionary(grouping: existing, by: { $0.request.content.title }).mapValues(\.count)
+                NSLog("SELFTEST bestaande meldingen per titel: %@", String(describing: titles))
+                let before = existing.count
+                // Twee meldingen met dezelfde sleutel moeten als één in het meldingencentrum staan (de tweede vervangt de eerste).
+                await WatchStore.notify(Notice(key: "selftest-replace", thread: "selftest", title: "Selftest", body: "eerste \(Date())"))
+                try? await Task.sleep(for: .seconds(1.5))
+                await WatchStore.notify(Notice(key: "selftest-replace", thread: "selftest", title: "Selftest", body: "tweede \(Date())"))
+                try? await Task.sleep(for: .seconds(1.5))
+                let delivered = await center.deliveredNotifications()
+                let same = delivered.filter { $0.request.identifier == "selftest-replace" }
+                NSLog("SELFTEST delivered before=%d after=%d metZelfdeSleutel=%d tekst=%@", before, delivered.count, same.count, same.first?.request.content.body ?? "-")
+                center.removeDeliveredNotifications(withIdentifiers: ["selftest-replace"])
+            }
+            exit(0)
+        }
+    }
+    #endif
 
     var body: some Scene {
         WindowGroup {
@@ -102,6 +132,11 @@ struct CardsApp: App {
     /// Prijsbestanden + trend-alerts (kan ook op de achtergrond).
     @MainActor
     private func refreshPrices() async {
+        // Zijn er alerts en is nog niet naar meldingen gevraagd, vraag het dan nu (anders merk je nooit iets van een alert).
+        if watch.entries.contains(where: { $0.target != nil || $0.dealAlert == true }),
+           await WatchStore.authorizationStatus() == .notDetermined {
+            _ = await WatchStore.requestPermission()
+        }
         await catalog.start()
         for e in watch.entries { history.record(id: e.id, price: catalog.byID[e.id]?.mainPrice) }
         history.record(id: HistoryStore.portfolioID, price: collection.entries.isEmpty ? nil : collection.totalValue(catalog: catalog))

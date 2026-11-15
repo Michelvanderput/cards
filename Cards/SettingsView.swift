@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
     @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .defaultValue
@@ -11,6 +12,8 @@ struct SettingsView: View {
     @State private var imageBytes: Int64 = 0
     @State private var showLogin = false
     @State private var sync = CloudSync.shared
+    @State private var notifStatus: UNAuthorizationStatus = .notDetermined
+    @State private var testSent = false
 
     var body: some View {
         @Bindable var settings = settings
@@ -79,6 +82,21 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    LabeledContent("Meldingen") {
+                        Text(NotificationSupport.describe(notifStatus)).foregroundStyle(NotificationSupport.isAllowed(notifStatus) ? .green : .orange)
+                    }
+                    if notifStatus == .notDetermined {
+                        Button("Meldingen toestaan") { Task { _ = await WatchStore.requestPermission(); notifStatus = await WatchStore.authorizationStatus() } }
+                    }
+                    if notifStatus == .denied { Button("Open instellingen") { NotificationSupport.openSystemSettings() } }
+                    Button(testSent ? "Testmelding verstuurd" : "Stuur testmelding") {
+                        Task {
+                            if notifStatus == .notDetermined { _ = await WatchStore.requestPermission() }
+                            await WatchStore.notify(title: "Testmelding", body: "Als je dit ziet, werken meldingen van Cards.")
+                            notifStatus = await WatchStore.authorizationStatus()
+                            testSent = true
+                        }
+                    }
                     Toggle("Alerts per staat automatisch controleren", isOn: $autoCheck)
                 } header: { Text("Meldingen") } footer: {
                     Text("""
@@ -105,7 +123,10 @@ struct SettingsView: View {
             }
             .formStyle(.grouped)
             .navigationTitle("Instellingen")
-            .task { imageBytes = await ImageStore.shared.diskBytes() }
+            .task {
+                imageBytes = await ImageStore.shared.diskBytes()
+                notifStatus = await WatchStore.authorizationStatus()
+            }
             .sheet(isPresented: $showLogin) { LoginSheet() }
         }
     }

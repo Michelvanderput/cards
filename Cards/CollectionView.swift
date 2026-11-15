@@ -271,8 +271,8 @@ struct AddToCollectionSheet: View {
                     Stepper("Aantal: \(quantity)", value: $quantity, in: 1...999)
                 }
                 Section {
-                    TextField("Betaald per kaart (EUR)", value: $paid, format: .number)
-                    TextField("Jouw prijs per kaart (EUR)", value: $myPrice, format: .number)
+                    PriceField(title: "Betaald per kaart (EUR)", value: $paid)
+                    PriceField(title: "Jouw prijs per kaart (EUR)", value: $myPrice)
                     ForEach(suggestions, id: \.label) { s in
                         Button("\(s.label): \(euro(s.price))") { myPrice = s.price }
                     }
@@ -284,7 +284,7 @@ struct AddToCollectionSheet: View {
                 Section {
                     Toggle("Te koop", isOn: $forSale)
                     if forSale {
-                        TextField("Vraagprijs per kaart (EUR)", value: $asking, format: .number)
+                        PriceField(title: "Vraagprijs per kaart (EUR)", value: $asking)
                         let review = SaleAdvisor.review(draft, market: market, settings: settings)
                         HStack {
                             Text("Beoordeling")

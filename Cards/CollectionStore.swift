@@ -44,7 +44,10 @@ struct CollectionEntry: Identifiable, Codable, Hashable {
 final class CollectionStore {
     private(set) var entries: [CollectionEntry] = []
 
-    init() { load() }
+    private let storage: URL?
+
+    /// - Parameter storage: map voor het opslagbestand (alleen voor tests); standaard de app-map.
+    init(storage: URL? = nil) { self.storage = storage; load() }
 
     func add(_ entry: CollectionEntry) { entries.append(entry); save() }
 
@@ -74,7 +77,7 @@ final class CollectionStore {
     // MARK: - Opslag
 
     private var fileURL: URL {
-        let dir = URL.applicationSupportDirectory.appending(path: "Cards", directoryHint: .isDirectory)
+        let dir = storage ?? URL.applicationSupportDirectory.appending(path: "Cards", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appending(path: "collection.json")
     }

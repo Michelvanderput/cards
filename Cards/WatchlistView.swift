@@ -18,13 +18,30 @@ struct WatchlistView: View {
                         .font(.footnote).foregroundStyle(.orange)
                 }
                 ForEach(watch.entries) { e in
-                    if let item = catalog.byID[e.id] {
-                        NavigationLink(value: item) { row(item: item, entry: e) }
-                    } else {
-                        Text(e.name)
+                    HStack {
+                        if let item = catalog.byID[e.id] {
+                            NavigationLink(value: item) { row(item: item, entry: e) }
+                        } else {
+                            Text(e.name)
+                        }
+                        #if os(macOS)
+                        // Op de Mac staat altijd een zichtbaar prullenbakje bij de rij.
+                        Button { watch.remove(e.id) } label: { Image(systemName: "trash") }
+                            .buttonStyle(.borderless).foregroundStyle(.secondary).help("Van watchlist halen")
+                        #endif
+                    }
+                    // Veegbeweging (iPhone en Mac-trackpad), lang indrukken of rechtsklikken en de bewerkknop werken alle drie.
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) { watch.remove(e.id) } label: { Label("Verwijder", systemImage: "trash") }
+                    }
+                    .contextMenu {
+                        Button(role: .destructive) { watch.remove(e.id) } label: { Label("Van watchlist halen", systemImage: "trash") }
+                        if e.alertSummary != nil {
+                            Button { watch.clearAlert(e.id) } label: { Label("Alert verwijderen", systemImage: "bell.slash") }
+                        }
                     }
                 }
-                .onDelete { idx in idx.map { watch.entries[$0].id }.forEach(watch.remove) }
+                .onDelete { idx in watch.remove(ids: Set(idx.map { watch.entries[$0].id })) }
             }
             .overlay {
                 if watch.entries.isEmpty {
@@ -35,6 +52,9 @@ struct WatchlistView: View {
             .navigationTitle("Watchlist")
             .navigationDestination(for: CardItem.self) { DetailView(item: $0) }
             .toolbar {
+                #if os(iOS)
+                ToolbarItem(placement: .topBarLeading) { if !watch.entries.isEmpty { EditButton() } }
+                #endif
                 if !checker.lastListings.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
                         Button { showBundle = true } label: { Label("Bundelen", systemImage: "shippingbox.and.arrow.backward") }

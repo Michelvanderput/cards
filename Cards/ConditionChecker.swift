@@ -33,6 +33,7 @@ final class ConditionChecker {
         done = 0
         defer { isRunning = false; current = nil }
 
+        var deals: [Notice] = []
         for entry in due {
             let cond = entry.minCondition
             current = entry.name
@@ -42,6 +43,7 @@ final class ConditionChecker {
                 if !interactive && loader.status == .needsCheck {
                     loader.stop()
                     needsAttention = true
+                    await watch.sendDeals(deals)
                     await noticeAttention()
                     return
                 }
@@ -60,15 +62,19 @@ final class ConditionChecker {
                     if let best = relevant.max(by: { (scores[$0.id]?.value ?? 0) < (scores[$1.id]?.value ?? 0) }),
                        let sc = scores[best.id], sc.value >= 80 {
                         let off = sc.discount.map { " (\(Int(($0 * 100).rounded()))% onder de markt)" } ?? ""
-                        await watch.applyDeal(id: entry.id, signature: "\(best.seller)|\(best.price)|\(best.condition)",
-                                              body: "\(best.condition) voor \(euro(best.price)) uit \(best.country), dealscore \(sc.value)\(off)."
-                                                + (sc.advice == .askPhoto ? " Vraag eerst een foto." : sc.advice == .checkPhoto ? " Check eerst de foto." : sc.advice == .suspicious ? " Opvallend goedkoop: controleer goed." : ""))
+                        let advice = sc.advice == .askPhoto ? " Vraag eerst een foto." : sc.advice == .checkPhoto ? " Check eerst de foto."
+                            : sc.advice == .suspicious ? " Opvallend goedkoop: controleer goed." : ""
+                        if let notice = watch.registerDeal(id: entry.id, signature: "\(best.seller)|\(best.price)|\(best.condition)", price: sc.total,
+                                                           body: "\(best.condition) voor \(euro(best.price)) uit \(best.country), dealscore \(sc.value)\(off).\(advice)") {
+                            deals.append(notice)
+                        }
                     }
                 }
             }
             done += 1
             try? await Task.sleep(for: .seconds(3))   // rustig aan: één kaart tegelijk, met pauze
         }
+        await watch.sendDeals(deals)
     }
 
     /// Haalt de aanbiedingen op voor een lijst kaarten (bijv. je verkoopaanbod) en bewaart de marktstatistieken.
@@ -99,7 +105,7 @@ final class ConditionChecker {
     private func noticeAttention() async {
         if let last = lastAttentionNotice, Date().timeIntervalSince(last) < 12 * 3600 { return }
         lastAttentionNotice = Date()
-        await WatchStore.notify(title: "Controle nodig",
-                                body: "Cardmarket vraagt een beveiligingscontrole. Open Cards en tik 'Watchlist controleren'.")
+        await WatchStore.notify(Notice(key: "attention", thread: "algemeen", title: "Controle nodig",
+                                       body: "Cardmarket vraagt een beveiligingscontrole. Open Cards en tik 'Watchlist controleren'."))
     }
 }

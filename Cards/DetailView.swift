@@ -91,8 +91,10 @@ struct DetailView: View {
                 Section("Holo / foil") { rows(current.holo) }
             }
             Section {
-                if let e = watch.entry(item.id), let summary = e.alertSummary {
-                    LabeledContent("Alert", value: summary)
+                if let e = watch.entry(item.id) {
+                    if let summary = e.alertSummary { LabeledContent("Alert", value: summary) }
+                    Button("Alert instellen of wijzigen") { showAlert = true }
+                    Button("Niet meer volgen", role: .destructive) { watch.remove(item.id) }
                 }
                 NavigationLink("Aanbiedingen per staat") { ListingsView(item: current) }
                 Link("Open op Cardmarket", destination: current.cardmarketURL)

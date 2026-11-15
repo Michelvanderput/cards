@@ -15,7 +15,10 @@ final class HistoryStore {
     /// Reeks voor de totale collectiewaarde.
     static let portfolioID = -1
 
-    init() { load() }
+    private let storage: URL?
+
+    /// - Parameter storage: map voor het opslagbestand (alleen voor tests); standaard de app-map.
+    init(storage: URL? = nil) { self.storage = storage; load() }
 
     func record(id: Int, price: Double?, on date: Date = Date()) {
         guard let price else { return }
@@ -32,7 +35,7 @@ final class HistoryStore {
     }
 
     private var fileURL: URL {
-        let dir = URL.applicationSupportDirectory.appending(path: "Cards", directoryHint: .isDirectory)
+        let dir = storage ?? URL.applicationSupportDirectory.appending(path: "Cards", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appending(path: "history.json")
     }
