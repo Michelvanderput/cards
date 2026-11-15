@@ -201,3 +201,50 @@ final class LanguageFilterTests: XCTestCase {
         XCTAssertEqual(LanguageFilter.apply(.all, to: all).count, 5)
     }
 }
+
+final class CSVTests: XCTestCase {
+    func testParsesQuotesAndDelimiters() {
+        let rows = CollectionCSV.parse("naam;aantal\n\"Pikachu; V\";2\n\"Say \"\"hi\"\"\";1\n")
+        XCTAssertEqual(rows.count, 3)
+        XCTAssertEqual(rows[1], ["Pikachu; V", "2"])
+        XCTAssertEqual(rows[2], ["Say \"hi\"", "1"])
+        XCTAssertEqual(CollectionCSV.parse("a,b\n1,2")[1], ["1", "2"])   // komma gedetecteerd
+    }
+
+    func testNumberParsing() {
+        XCTAssertEqual(CollectionCSV.number("12,50"), 12.5)
+        XCTAssertEqual(CollectionCSV.number("1.234,56"), 1234.56)
+        XCTAssertEqual(CollectionCSV.number("€ 3.5"), 3.5)
+        XCTAssertNil(CollectionCSV.number(""))
+    }
+
+    func testReadsOwnExportFormat() {
+        let text = "\u{FEFF}naam;cardmarket_id;set;staat;aantal;betaald_per_kaart;mijn_prijs;vraagprijs;te_koop;waarde_per_kaart\n" +
+                   "Charizard;273699;Base Set;EX;2;10,00;15,50;20,00;ja;12,00\n"
+        let rows = CollectionCSV.rows(from: text)
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].productID, 273699)
+        XCTAssertEqual(rows[0].condition, .ex)
+        XCTAssertEqual(rows[0].quantity, 2)
+        XCTAssertEqual(rows[0].paid, 10)
+        XCTAssertEqual(rows[0].asking, 20)
+        XCTAssertTrue(rows[0].forSale)
+    }
+
+    func testReadsEnglishHeadersAndDefaults() {
+        let rows = CollectionCSV.rows(from: "Card Name,Qty,Condition\nPikachu,3,lp\nMew,,xx\n")
+        XCTAssertEqual(rows.map(\.name), ["Pikachu", "Mew"])
+        XCTAssertEqual(rows[0].condition, .lp)
+        XCTAssertEqual(rows[1].condition, .nm)      // onbekende staat → NM
+        XCTAssertEqual(rows[1].quantity, 1)         // leeg aantal → 1
+    }
+
+    func testRejectsFilesWithoutNameColumn() {
+        XCTAssertTrue(CollectionCSV.rows(from: "foo;bar\n1;2").isEmpty)
+    }
+
+    func testKeyNormalisation() {
+        XCTAssertEqual(CollectionCSV.key("Dragonite-GX"), CollectionCSV.key("Dragonite GX"))
+        XCTAssertEqual(CollectionCSV.key("Pokémon"), CollectionCSV.key("pokemon"))
+    }
+}

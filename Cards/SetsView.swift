@@ -82,6 +82,7 @@ struct SetDetailView: View {
     @State private var query = ""
     @State private var sort: SearchSort = .priceDesc
     @State private var ownership: Ownership = .all
+    @State private var showMissing = false
     @State private var downloaded: Int?
     @State private var downloadTask: Task<Void, Never>?
     @AppStorage("gridMode") private var gridMode = true
@@ -115,6 +116,7 @@ struct SetDetailView: View {
             if gridMode { CardGrid(items: items) }
             else { List(items) { item in NavigationLink(value: item) { CardRow(item: item) } } }
         }
+        .sheet(isPresented: $showMissing) { MissingCardsSheet(set: set) }
         .searchable(text: $query, prompt: "Zoek in \(set.name)")
         .navigationTitle(set.name)
         #if os(iOS)
@@ -155,6 +157,12 @@ struct SetDetailView: View {
         }
     }
 
+    /// Kaarten uit deze set die je nog niet in je collectie hebt.
+    private var missing: [CardItem] {
+        let owned = Set(collection.entries.map(\.productID))
+        return (catalog.itemsBySet[set.id] ?? []).filter { !owned.contains($0.id) }
+    }
+
     private var header: some View {
         HStack(spacing: 14) {
             SetLogo(set: set, height: 44)
@@ -164,9 +172,69 @@ struct SetDetailView: View {
                 ProgressView(value: Double(owned), total: Double(max(set.count, 1))).tint(Theme.accent)
                 Text(downloadTask != nil ? "Plaatjes downloaden voor offline gebruik…" : "\(owned) in je collectie")
                     .font(.caption).foregroundStyle(.secondary)
+                if downloadTask == nil, !missing.isEmpty {
+                    Button { showMissing = true } label: {
+                        Label("Compleet maken ≈ \(euro(missing.reduce(0) { $0 + ($1.mainPrice ?? 0) }))", systemImage: "cart")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.plain).foregroundStyle(Theme.accent)
+                }
             }
         }
         .padding()
         .background(.bar)
+    }
+}
+
+/// Wat je nog mist uit een set en wat het compleet maken ongeveer kost.
+struct MissingCardsSheet: View {
+    let set: SetInfo
+    @Environment(CatalogStore.self) private var catalog
+    @Environment(CollectionStore.self) private var collection
+    @Environment(\.dismiss) private var dismiss
+
+    private var missing: [CardItem] {
+        let owned = Set(collection.entries.map(\.productID))
+        return (catalog.itemsBySet[set.id] ?? []).filter { !owned.contains($0.id) }
+            .sorted { ($0.mainPrice ?? 0) > ($1.mainPrice ?? 0) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            let list = missing
+            let total = list.reduce(0) { $0 + ($1.mainPrice ?? 0) }
+            let cheap = list.filter { ($0.mainPrice ?? 0) <= 1 }
+            List {
+                Section {
+                    LabeledContent("Ontbrekende kaarten", value: "\(list.count) van \(set.count)")
+                    LabeledContent("Geschatte kosten", value: euro(total)).fontWeight(.semibold)
+                    LabeledContent("Waarvan de 5 duurste", value: euro(list.prefix(5).reduce(0) { $0 + ($1.mainPrice ?? 0) }))
+                    LabeledContent("Kaarten onder €1", value: "\(cheap.count) (\(euro(cheap.reduce(0) { $0 + ($1.mainPrice ?? 0) })))")
+                } footer: {
+                    Text("Gebaseerd op de Cardmarket-trendprijs per kaart (alle staten). Verzending en de echte aanbiedingen komen daar nog bij.")
+                }
+                Section("Koopladder (duurste eerst)") {
+                    ForEach(list) { item in
+                        NavigationLink(value: item) { CardRow(item: item) }
+                    }
+                }
+            }
+            .navigationDestination(for: CardItem.self) { DetailView(item: $0) }
+            .navigationTitle(set.name)
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Klaar") { dismiss() } }
+                ToolbarItem(placement: .primaryAction) { ShareLink(item: shoppingList(list)) { Label("Deel lijst", systemImage: "square.and.arrow.up") } }
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 480, minHeight: 560)
+        #endif
+    }
+
+    private func shoppingList(_ list: [CardItem]) -> String {
+        "Ontbrekend uit \(set.name):\n" + list.map { "\($0.name) – \(euro($0.mainPrice))" }.joined(separator: "\n")
     }
 }

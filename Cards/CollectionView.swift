@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import UniformTypeIdentifiers
 
 struct CollectionView: View {
     @Environment(CatalogStore.self) private var catalog
@@ -13,6 +14,9 @@ struct CollectionView: View {
     @State private var query = ""
     @State private var onlyForSale = false
     @State private var showMarketCheck = false
+    @State private var showImporter = false
+    @State private var importPreview: ImportPreview?
+    @State private var importError: String?
 
     private var filtered: [CollectionEntry] {
         var list = collection.entries
@@ -60,6 +64,7 @@ struct CollectionView: View {
             .navigationDestination(for: CardItem.self) { DetailView(item: $0) }
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
+                    Button { showImporter = true } label: { Label("Importeer CSV", systemImage: "square.and.arrow.down") }
                     if collection.entries.contains(where: \.forSale) {
                         Button { showMarketCheck = true } label: { Label("Marktcheck", systemImage: "chart.bar.doc.horizontal") }
                     }
@@ -68,6 +73,24 @@ struct CollectionView: View {
                     }
                 }
             }
+            .fileImporter(isPresented: $showImporter, allowedContentTypes: [.commaSeparatedText, .plainText, .text]) { result in
+                switch result {
+                case .success(let url):
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    guard let text = try? String(contentsOf: url, encoding: .utf8) ?? String(contentsOf: url, encoding: .isoLatin1) else {
+                        importError = "Het bestand kon niet gelezen worden."; return
+                    }
+                    let rows = CollectionCSV.rows(from: text)
+                    if rows.isEmpty { importError = "Geen kolom met kaartnamen of Cardmarket-id gevonden." }
+                    else { importPreview = ImportPreview(match: CollectionCSV.match(rows, catalog: catalog), total: rows.count) }
+                case .failure(let error): importError = error.localizedDescription
+                }
+            }
+            .alert("Importeren niet gelukt", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: { Text(importError ?? "") }
+            .sheet(item: $importPreview) { preview in ImportPreviewSheet(preview: preview) }
             .sheet(item: $editing) { entry in
                 if let item = catalog.byID[entry.productID] { AddToCollectionSheet(item: item, existing: entry) }
             }
@@ -322,5 +345,81 @@ struct AddToCollectionSheet: View {
             collection.add(draft)
         }
         dismiss()
+    }
+}
+
+struct ImportPreview: Identifiable {
+    let id = UUID()
+    let match: CollectionCSV.MatchResult
+    let total: Int
+}
+
+/// Toont wat er geïmporteerd wordt voordat er iets aan je collectie wordt toegevoegd.
+struct ImportPreviewSheet: View {
+    let preview: ImportPreview
+    @Environment(CollectionStore.self) private var collection
+    @Environment(\.dismiss) private var dismiss
+
+    private var newRows: [(row: CSVImportRow, item: CardItem)] {
+        preview.match.matched.filter { m in
+            !collection.entries.contains { $0.productID == m.item.id && $0.condition == m.row.condition }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            let new = newRows
+            let skipped = preview.match.matched.count - new.count
+            List {
+                Section {
+                    LabeledContent("Regels in bestand", value: "\(preview.total)")
+                    LabeledContent("Herkend, worden toegevoegd", value: "\(new.count)").foregroundStyle(.green)
+                    if skipped > 0 { LabeledContent("Al in je collectie (overgeslagen)", value: "\(skipped)") }
+                    if !preview.match.ambiguous.isEmpty { LabeledContent("Meerdere kaarten mogelijk", value: "\(preview.match.ambiguous.count)").foregroundStyle(.orange) }
+                    if !preview.match.unmatched.isEmpty { LabeledContent("Niet gevonden", value: "\(preview.match.unmatched.count)").foregroundStyle(.orange) }
+                } footer: {
+                    Text("Kaarten zonder Cardmarket-id worden op naam (en set) gekoppeld. Is dat niet eenduidig, dan wordt de regel overgeslagen: voeg die kaarten handmatig toe.")
+                }
+                if !new.isEmpty {
+                    Section("Wordt toegevoegd") {
+                        ForEach(new.prefix(50), id: \.row.id) { m in
+                            HStack {
+                                Text(m.item.name).lineLimit(1)
+                                Spacer()
+                                Text("\(m.row.quantity)× \(m.row.condition.rawValue)").foregroundStyle(.secondary)
+                            }
+                        }
+                        if new.count > 50 { Text("… en \(new.count - 50) meer").foregroundStyle(.secondary) }
+                    }
+                }
+                let problems = preview.match.ambiguous + preview.match.unmatched
+                if !problems.isEmpty {
+                    Section("Niet geïmporteerd") {
+                        ForEach(problems.prefix(30)) { r in Text(r.name).lineLimit(1).foregroundStyle(.secondary) }
+                    }
+                }
+            }
+            .navigationTitle("CSV importeren")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Annuleer") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Importeer \(new.count)") {
+                        for m in new {
+                            collection.add(CollectionEntry(productID: m.item.id, name: m.item.name, condition: m.row.condition,
+                                                           quantity: m.row.quantity, paidPrice: m.row.paid, myPrice: m.row.myPrice,
+                                                           forSale: m.row.forSale, askingPrice: m.row.asking))
+                        }
+                        dismiss()
+                    }
+                    .disabled(new.isEmpty)
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 460, minHeight: 520)
+        #endif
     }
 }
