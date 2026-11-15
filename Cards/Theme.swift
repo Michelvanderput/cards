@@ -71,8 +71,12 @@ struct CardRow: View {
             CardImage(item: item).frame(width: 46)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name).lineLimit(2)
-                if let set = catalog.setName(for: item) {
-                    Text(set).font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    if let set = catalog.setName(for: item) {
+                        Text([set, catalog.cardNumber(for: item)].compactMap { $0 }.joined(separator: " · "))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    VariantChip(item: item)
                 }
             }
             Spacer()
@@ -84,6 +88,7 @@ struct CardRow: View {
 /// Tegel voor rasterweergaven.
 struct CardTile: View {
     let item: CardItem
+    @Environment(CatalogStore.self) private var catalog
     var body: some View {
         VStack(spacing: 6) {
             CardImage(item: item)
@@ -96,7 +101,30 @@ struct CardTile: View {
                         .padding(5)
                 }
             Text(item.name).font(.caption).lineLimit(2).multilineTextAlignment(.center)
+            VariantChip(item: item)
         }
+    }
+}
+
+/// Toont de variant ("Reverse holo", "1e editie") en, bij gegroepeerde kaarten, hoeveel uitvoeringen er zijn.
+struct VariantChip: View {
+    let item: CardItem
+    @Environment(CatalogStore.self) private var catalog
+    @AppStorage("groupVariants") private var groupVariants = true
+
+    var body: some View {
+        let count = catalog.variants(of: item).count
+        if let label = catalog.variantLabel(for: item) {
+            chip(label, color: .purple)
+        } else if groupVariants, count > 1 {
+            chip("\(count) uitvoeringen", color: .secondary)
+        }
+    }
+
+    private func chip(_ text: String, color: Color) -> some View {
+        Text(text).font(.caption2.weight(.semibold)).lineLimit(1)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(color.opacity(0.15), in: .capsule).foregroundStyle(color)
     }
 }
 

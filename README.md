@@ -35,6 +35,12 @@ python3 Scripts/make_cardmap.py cards2.jsonl set_names.json products_singles_6.j
 - **Cardmarket-account:** inloggen in een webweergave; de app ziet je wachtwoord niet. *Mijn aanbod beoordelen* is experimenteel.
 - Tests: `xcodebuild -scheme Cards -destination 'platform=macOS' test`
 
+## Sync, widget en meer
+- **iCloud-sync** van collectie, watchlist, binders en prijsgeschiedenis tussen Mac en iPhone (iCloud Drive-container); bij een conflict worden beide versies samengevoegd.
+- **Widget** met je collectiewaarde en de grootste stijger (via een App Group).
+- **Sets:** hoofdset samengevoegd, varianten (reverse holo, 1e editie, patronen) gegroepeerd op fysieke kaart, kaartnummer en V.1/V.2-labels, compleet-maken-kosten, CSV-import.
+- Tests met lokale entitlements: `xcodebuild -scheme Cards -destination 'platform=macOS' CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= CODE_SIGN_ENTITLEMENTS=Cards/CardsLocal.entitlements test`
+
 ## Alerts
 - **Trend-alert:** op de Cardmarket-trendprijs (alle staten). Wordt gecontroleerd bij het starten (en op iOS best effort op de achtergrond).
 - **Alert per staat** (NM/EX/GD/LP of beter): kijkt naar de goedkoopste aanbieding op de Cardmarket-pagina via een webweergave. Dat werkt alleen met de app open (bij het starten, op de Mac elke 30 min, of via *Watchlist controleren*). Vraagt Cardmarket een Cloudflare-controle, dan krijg je een melding om die zelf aan te tikken.

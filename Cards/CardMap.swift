@@ -7,6 +7,8 @@ struct CardMap {
     var images: [Int: String] = [:]    // idProduct -> TCGdex-pad, bv. "en/base/base1/4"
     var setPaths: [Int: String] = [:]  // idExpansion -> TCGdex-setpad, bv. "en/base/base1" (voor het logo)
     var setDates: [String: Date] = [:] // setpad -> releasedatum
+    var variants: [Int: String] = [:]  // idProduct -> variantlabel (leeg = gewone kaart)
+    var main: Set<Int> = []            // expansions van de Engelse hoofdset (anderen zijn andere uitvoeringen)
     var exact: Set<Int> = []           // producten waarvan TCGdex het Cardmarket-id kent (betrouwbare koppeling)
 
     static let empty = CardMap()
@@ -20,6 +22,8 @@ struct CardMap {
             images: Dictionary(uniqueKeysWithValues: raw.images.compactMap { k, v in Int(k).map { ($0, v) } }),
             setPaths: Dictionary(uniqueKeysWithValues: (raw.setPaths ?? [:]).compactMap { k, v in Int(k).map { ($0, v) } }),
             setDates: (raw.setDates ?? [:]).compactMapValues { Self.dateFormatter.date(from: $0) },
+            variants: Dictionary(uniqueKeysWithValues: (raw.variants ?? [:]).compactMap { k, v in Int(k).map { ($0, v) } }),
+            main: Set(raw.main ?? []),
             exact: Set(raw.exact ?? []))
     }
 
@@ -29,6 +33,8 @@ struct CardMap {
         let exact: [Int]?
         let setPaths: [String: String]?
         let setDates: [String: String]?
+        let variants: [String: String]?
+        let main: [Int]?
     }
 
     private static let dateFormatter: DateFormatter = {

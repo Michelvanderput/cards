@@ -84,7 +84,10 @@ final class CollectionStore {
            let decoded = try? JSONDecoder().decode([CollectionEntry].self, from: data) { entries = decoded }
     }
 
+    func reload() { load() }
+
     private func save() {
         if let data = try? JSONEncoder().encode(entries) { try? data.write(to: fileURL, options: .atomic) }
+        CloudSync.shared.localChanged("collection.json")
     }
 }

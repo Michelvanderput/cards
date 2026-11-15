@@ -42,7 +42,10 @@ final class HistoryStore {
            let decoded = try? JSONDecoder().decode([Int: [PricePoint]].self, from: data) { points = decoded }
     }
 
+    func reload() { load() }
+
     private func save() {
         if let data = try? JSONEncoder().encode(points) { try? data.write(to: fileURL, options: .atomic) }
+        CloudSync.shared.localChanged("history.json")
     }
 }

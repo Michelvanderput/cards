@@ -21,10 +21,12 @@ struct SetsView: View {
     @State private var query = ""
     @AppStorage("setSort") private var setSort: SetSort = .newest
     @AppStorage("onlyNamedSets") private var onlyNamed = true
+    @AppStorage("showOtherEditions") private var showOther = false
 
     private var sets: [SetInfo] {
         var list = catalog.sets
         if onlyNamed { list = list.filter(\.isNamed) }
+        if !showOther { list = list.filter(\.isMain) }
         if !query.isEmpty { list = list.filter { $0.name.localizedCaseInsensitiveContains(query) } }
         switch setSort {
         case .newest: return list.sorted { ($0.releaseDate ?? .distantPast, $0.id) > ($1.releaseDate ?? .distantPast, $1.id) }
@@ -34,8 +36,8 @@ struct SetsView: View {
     }
 
     private func subtitle(_ set: SetInfo) -> String {
-        if let d = set.releaseDate { return "\(d.formatted(.dateTime.month(.abbreviated).year())) · \(set.count) kaarten" }
-        return "\(set.count) kaarten"
+        if let d = set.releaseDate { return "\(d.formatted(.dateTime.month(.abbreviated).year())) · \(set.cardCount) kaarten" }
+        return "\(set.cardCount) kaarten"
     }
 
     var body: some View {
@@ -63,6 +65,7 @@ struct SetsView: View {
                             ForEach(SetSort.allCases) { Text($0.rawValue).tag($0) }
                         }
                         Toggle("Alleen sets met naam", isOn: $onlyNamed)
+                        Toggle("Toon andere uitvoeringen (Japans e.d.)", isOn: $showOther)
                     } label: { Label("Opties", systemImage: "line.3.horizontal.decrease.circle") }
                 }
             }
@@ -86,14 +89,15 @@ struct SetDetailView: View {
     @State private var downloaded: Int?
     @State private var downloadTask: Task<Void, Never>?
     @AppStorage("gridMode") private var gridMode = true
+    @AppStorage("groupVariants") private var groupVariants = true
 
     private var items: [CardItem] {
-        var list = catalog.itemsBySet[set.id] ?? []
+        var list = catalog.cards(in: set, grouped: groupVariants)
         let owned = Set(collection.entries.map(\.productID))
         switch ownership {
         case .all: break
-        case .owned: list = list.filter { owned.contains($0.id) }
-        case .missing: list = list.filter { !owned.contains($0.id) }
+        case .owned: list = list.filter { catalog.isOwned($0, ownedIDs: owned) }
+        case .missing: list = list.filter { !catalog.isOwned($0, ownedIDs: owned) }
         }
         if !query.isEmpty { list = list.filter { $0.name.localizedCaseInsensitiveContains(query) } }
         switch sort {
@@ -105,8 +109,8 @@ struct SetDetailView: View {
     }
 
     private var owned: Int {
-        let ids = Set((catalog.itemsBySet[set.id] ?? []).map(\.id))
-        return Set(collection.entries.map(\.productID)).intersection(ids).count
+        let ids = Set(collection.entries.map(\.productID))
+        return catalog.cards(in: set, grouped: groupVariants).filter { catalog.isOwned($0, ownedIDs: ids) }.count
     }
 
     var body: some View {
@@ -160,16 +164,17 @@ struct SetDetailView: View {
     /// Kaarten uit deze set die je nog niet in je collectie hebt.
     private var missing: [CardItem] {
         let owned = Set(collection.entries.map(\.productID))
-        return (catalog.itemsBySet[set.id] ?? []).filter { !owned.contains($0.id) }
+        return catalog.cards(in: set, grouped: true).filter { !catalog.isOwned($0, ownedIDs: owned) }
     }
 
     private var header: some View {
         HStack(spacing: 14) {
             SetLogo(set: set, height: 44)
             VStack(alignment: .leading, spacing: 4) {
-                Text(set.releaseDate.map { "\($0.formatted(.dateTime.day().month(.abbreviated).year())) · \(set.count) kaarten" } ?? "\(set.count) kaarten")
+                let total = catalog.cards(in: set, grouped: groupVariants).count
+                Text(set.releaseDate.map { "\($0.formatted(.dateTime.day().month(.abbreviated).year())) · \(total) kaarten" } ?? "\(total) kaarten")
                     .font(.subheadline.weight(.medium))
-                ProgressView(value: Double(owned), total: Double(max(set.count, 1))).tint(Theme.accent)
+                ProgressView(value: Double(owned), total: Double(max(total, 1))).tint(Theme.accent)
                 Text(downloadTask != nil ? "Plaatjes downloaden voor offline gebruik…" : "\(owned) in je collectie")
                     .font(.caption).foregroundStyle(.secondary)
                 if downloadTask == nil, !missing.isEmpty {
@@ -195,7 +200,7 @@ struct MissingCardsSheet: View {
 
     private var missing: [CardItem] {
         let owned = Set(collection.entries.map(\.productID))
-        return (catalog.itemsBySet[set.id] ?? []).filter { !owned.contains($0.id) }
+        return catalog.cards(in: set, grouped: true).filter { !catalog.isOwned($0, ownedIDs: owned) }
             .sorted { ($0.mainPrice ?? 0) > ($1.mainPrice ?? 0) }
     }
 
@@ -206,7 +211,7 @@ struct MissingCardsSheet: View {
             let cheap = list.filter { ($0.mainPrice ?? 0) <= 1 }
             List {
                 Section {
-                    LabeledContent("Ontbrekende kaarten", value: "\(list.count) van \(set.count)")
+                    LabeledContent("Ontbrekende kaarten", value: "\(list.count) van \(set.cardCount)")
                     LabeledContent("Geschatte kosten", value: euro(total)).fontWeight(.semibold)
                     LabeledContent("Waarvan de 5 duurste", value: euro(list.prefix(5).reduce(0) { $0 + ($1.mainPrice ?? 0) }))
                     LabeledContent("Kaarten onder €1", value: "\(cheap.count) (\(euro(cheap.reduce(0) { $0 + ($1.mainPrice ?? 0) })))")

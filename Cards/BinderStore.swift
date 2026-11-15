@@ -89,7 +89,10 @@ final class BinderStore {
            let decoded = try? JSONDecoder().decode([Binder].self, from: data) { binders = decoded }
     }
 
+    func reload() { load() }
+
     private func save() {
         if let data = try? JSONEncoder().encode(binders) { try? data.write(to: fileURL, options: .atomic) }
+        CloudSync.shared.localChanged("binders.json")
     }
 }

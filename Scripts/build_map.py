@@ -19,7 +19,7 @@ def set_cards(sid):
 with ThreadPoolExecutor(8) as ex:
     cards = [c for r in ex.map(set_cards, set_names) for c in r]
 print("cards", len(cards), flush=True)
-cache_path = f"{S}/cards2.jsonl"
+cache_path = f"{S}/cards3.jsonl"
 done = {}
 if os.path.exists(cache_path):
     for l in open(cache_path):
@@ -35,9 +35,27 @@ def fetch(c):
         if tp: prods.add(tp)
         cm = ((v.get("pricing") or {}).get("cardmarket") or {}).get("idProduct")
         if cm: prods.add(cm)
+    # Variantlabel per Cardmarket-product: normaal = geen label; anders type/stempel/foilpatroon.
+    FOIL = {"pokeball": "Poké Ball", "masterball": "Master Ball", "tinsel": "Tinsel"}
+    labels = {}
+    for v in d.get("variants_detailed", []) or []:
+        pid = (v.get("thirdParty") or {}).get("cardmarket") or ((v.get("pricing") or {}).get("cardmarket") or {}).get("idProduct")
+        if not pid: continue
+        if v.get("type") == "normal" and not v.get("foil") and not v.get("stamp"):
+            labels[pid] = ""            # basisproduct
+            continue
+        parts = []
+        if v.get("type") == "reverse": parts.append("Reverse holo")
+        elif v.get("type") == "holo": parts.append("Holo")
+        sub = v.get("subtype")
+        if sub and sub != "unlimited" and not str(sub)[0].isdigit(): parts.append(str(sub).replace("-", " ").capitalize())
+        for st in v.get("stamp") or []: parts.append(str(st).replace("-", " ").capitalize())
+        if v.get("foil"): parts.append(FOIL.get(v["foil"], str(v["foil"]).capitalize()))
+        label = " · ".join(parts)
+        if labels.get(pid) != "": labels.setdefault(pid, label)
     img = d.get("image")
     atk = [a.get("name") for a in (d.get("attacks") or []) if a.get("name")]
-    return {"id": c[0], "set": c[1], "name": d.get("name"), "atk": atk, "img": img.replace("https://assets.tcgdex.net/", "") if img else None, "prods": sorted(prods)}
+    return {"id": c[0], "set": c[1], "name": d.get("name"), "atk": atk, "img": img.replace("https://assets.tcgdex.net/", "") if img else None, "prods": sorted(prods), "var": {str(k): v for k, v in labels.items()}}
 n = 0
 with open(cache_path, "a") as f, ThreadPoolExecutor(12) as ex:
     for r in ex.map(fetch, todo):

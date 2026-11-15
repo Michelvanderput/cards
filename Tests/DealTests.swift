@@ -248,3 +248,120 @@ final class CSVTests: XCTestCase {
         XCTAssertEqual(CollectionCSV.key("Pokémon"), CollectionCSV.key("pokemon"))
     }
 }
+
+final class SyncTests: XCTestCase {
+    func testDecide() {
+        typealias A = SyncMerge.Action
+        XCTAssertEqual(SyncMerge.decide(localExists: false, remoteExists: false, localChanged: false, remoteChanged: false), A.none)
+        XCTAssertEqual(SyncMerge.decide(localExists: true, remoteExists: false, localChanged: true, remoteChanged: false), A.push)
+        XCTAssertEqual(SyncMerge.decide(localExists: false, remoteExists: true, localChanged: false, remoteChanged: true), A.pull)
+        XCTAssertEqual(SyncMerge.decide(localExists: true, remoteExists: true, localChanged: true, remoteChanged: false), A.push)
+        XCTAssertEqual(SyncMerge.decide(localExists: true, remoteExists: true, localChanged: false, remoteChanged: true), A.pull)
+        XCTAssertEqual(SyncMerge.decide(localExists: true, remoteExists: true, localChanged: true, remoteChanged: true), A.merge)
+        XCTAssertEqual(SyncMerge.decide(localExists: true, remoteExists: true, localChanged: false, remoteChanged: false), A.none)
+    }
+
+    func testMergeCollectionKeepsBothSides() throws {
+        let shared = CollectionEntry(productID: 1, name: "Shared", quantity: 1)
+        var remoteShared = shared; remoteShared.quantity = 5          // op afstand aangepast
+        let localOnly = CollectionEntry(productID: 2, name: "Local")
+        let remoteOnly = CollectionEntry(productID: 3, name: "Remote")
+        let l = try JSONEncoder().encode([shared, localOnly])
+        let r = try JSONEncoder().encode([remoteShared, remoteOnly])
+        let merged = try JSONDecoder().decode([CollectionEntry].self, from: XCTUnwrap(SyncMerge.merge(file: "collection.json", local: l, remote: r)))
+        XCTAssertEqual(Set(merged.map(\.productID)), [1, 2, 3])
+        XCTAssertEqual(merged.first { $0.productID == 1 }?.quantity, 5)   // versie van afstand wint bij gelijk id
+    }
+
+    func testMergeHistoryUnionsPoints() throws {
+        let d1 = Date(timeIntervalSince1970: 86400), d2 = Date(timeIntervalSince1970: 2 * 86400)
+        let l = try JSONEncoder().encode([7: [PricePoint(date: d1, price: 1)], 8: [PricePoint(date: d1, price: 9)]])
+        let r = try JSONEncoder().encode([7: [PricePoint(date: d2, price: 2)]])
+        let merged = try JSONDecoder().decode([Int: [PricePoint]].self, from: XCTUnwrap(SyncMerge.merge(file: "history.json", local: l, remote: r)))
+        XCTAssertEqual(merged[7]?.map(\.price), [1, 2])
+        XCTAssertEqual(merged[8]?.count, 1)
+    }
+
+    func testMergeWatchlistAndUnknownFile() throws {
+        let l = try JSONEncoder().encode([WatchEntry(id: 1, name: "a")])
+        let r = try JSONEncoder().encode([WatchEntry(id: 2, name: "b")])
+        let merged = try JSONDecoder().decode([WatchEntry].self, from: XCTUnwrap(SyncMerge.merge(file: "watchlist.json", local: l, remote: r)))
+        XCTAssertEqual(Set(merged.map(\.id)), [1, 2])
+        XCTAssertNil(SyncMerge.merge(file: "other.json", local: l, remote: r))
+    }
+
+    func testCorruptDataDoesNotCrashMerge() {
+        XCTAssertNil(SyncMerge.merge(file: "collection.json", local: Data("x".utf8), remote: Data("y".utf8)))
+    }
+}
+
+@MainActor
+final class VariantGroupingTests: XCTestCase {
+    private func item(_ id: Int, exp: Int, name: String = "Kaart") -> CardItem {
+        CardItem(id: id, name: name, expansionId: exp, metaID: nil, normal: PriceSet(), holo: PriceSet())
+    }
+
+    private func catalog() -> CatalogStore {
+        let items = [
+            item(11, exp: 1), item(10, exp: 1),                 // zelfde fysieke kaart #4: reverse holo (11) en gewoon (10)
+            item(12, exp: 1),                                   // andere kaart #173 (bv. alt art): blijft apart
+            item(20, exp: 2),                                   // tweede deel van dezelfde Engelse set, zelfde kaart #4
+            item(30, exp: 3),                                   // andere uitvoering (niet-hoofdset)
+            item(50, exp: 5, name: "Gelijk"), item(51, exp: 5, name: "Gelijk"), item(52, exp: 5, name: "Uniek"),   // niet gekoppeld
+        ]
+        let map = CardMap(sets: [1: "Set A", 2: "Set A", 3: "Set A", 5: "Set C"],
+                          images: [10: "en/x/seta/4", 11: "en/x/seta/4", 20: "en/x/seta/4", 12: "en/x/seta/173", 30: "en/x/seta/4"],
+                          variants: [11: "Reverse holo"], main: [1, 2, 5], exact: [10, 11, 12, 20, 30])
+        let store = CatalogStore()
+        store.load(snapshot: Snapshot(fetchedAt: Date(), items: items), map: map)
+        return store
+    }
+
+    func testMainSetPartsAreMergedAndOtherEditionsStaySeparate() {
+        let c = catalog()
+        let a = c.sets.first { $0.name == "Set A" }
+        XCTAssertEqual(a?.expansionIDs, [1, 2])
+        XCTAssertEqual(a?.count, 4)             // producten 11, 10, 12, 20
+        XCTAssertEqual(a?.cardCount, 2)         // kaart #4 en kaart #173
+        XCTAssertEqual(a?.isMain, true)
+        let other = c.sets.first { $0.name == "Set A (andere uitvoering)" }
+        XCTAssertEqual(other?.isMain, false)
+        XCTAssertEqual(c.sets.count, 3)         // Set A, andere uitvoering, Set C
+    }
+
+    func testOnlyTheSamePhysicalCardIsGrouped() {
+        let c = catalog()
+        XCTAssertEqual(c.variants(of: c.byID[11]!).map(\.id), [10, 11, 20])
+        XCTAssertEqual(c.variants(of: c.byID[12]!).map(\.id), [12])        // alt art blijft apart
+        XCTAssertEqual(c.collapse([c.byID[11]!, c.byID[10]!, c.byID[12]!]).map(\.id), [10, 12])
+    }
+
+    func testRepresentativePrefersStandardVariantAndLabels() {
+        let c = catalog()
+        XCTAssertEqual(c.collapse([c.byID[11]!]).map(\.id), [10])
+        XCTAssertEqual(c.variantLabel(for: c.byID[11]!), "Reverse holo")
+        XCTAssertNil(c.variantLabel(for: c.byID[10]!))
+        XCTAssertEqual(c.cardNumber(for: c.byID[12]!), "#173")
+    }
+
+    func testIdenticalUnlinkedProductsGetVersionLabelsAndAreNotHidden() {
+        let c = catalog()
+        XCTAssertEqual(c.variantLabel(for: c.byID[50]!), "V.1")
+        XCTAssertEqual(c.variantLabel(for: c.byID[51]!), "V.2")
+        XCTAssertNil(c.variantLabel(for: c.byID[52]!))
+        XCTAssertEqual(c.collapse([c.byID[50]!, c.byID[51]!, c.byID[52]!]).count, 3)   // niets verborgen zonder zekerheid
+    }
+
+    func testOwnershipCountsAnyVariantOfSamePhysicalCard() {
+        let c = catalog()
+        XCTAssertTrue(c.isOwned(c.byID[10]!, ownedIDs: [11]))
+        XCTAssertFalse(c.isOwned(c.byID[12]!, ownedIDs: [11]))
+    }
+
+    func testSetCardListsAreGrouped() {
+        let c = catalog()
+        let set = c.sets.first { $0.name == "Set A" }!
+        XCTAssertEqual(c.cards(in: set, grouped: true).count, 2)
+        XCTAssertEqual(c.cards(in: set, grouped: false).count, 4)
+    }
+}

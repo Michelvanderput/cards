@@ -46,7 +46,20 @@ struct CardsApp: App {
                 .environment(binders)
                 .environment(appSettings)
                 .environment(session)
+                .onChange(of: collection.entries) { _, _ in
+                    WidgetBridge.update(collection: collection, catalog: catalog, settings: appSettings)
+                }
                 .task {
+                    CloudSync.shared.onRemoteChange = { file in
+                        switch file {
+                        case "collection.json": collection.reload()
+                        case "watchlist.json": watch.reload()
+                        case "binders.json": binders.reload()
+                        case "history.json": history.reload()
+                        default: break
+                        }
+                    }
+                    await CloudSync.shared.start()
                     await refreshAll()
                     #if os(macOS)
                     // Op de Mac blijft de app vaak open: elke 30 minuten alerts opnieuw controleren.
@@ -93,6 +106,7 @@ struct CardsApp: App {
         for e in watch.entries { history.record(id: e.id, price: catalog.byID[e.id]?.mainPrice) }
         history.record(id: HistoryStore.portfolioID, price: collection.entries.isEmpty ? nil : collection.totalValue(catalog: catalog))
         await watch.evaluate(catalog: catalog)
+        WidgetBridge.update(collection: collection, catalog: catalog, settings: appSettings)
     }
 
     /// Alles, inclusief alerts per staat (vraagt de webweergave, dus alleen met de app open).

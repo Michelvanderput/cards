@@ -39,6 +39,10 @@ for c in cards:
             votes[exp][set_names[c["set"]]] += 1
             if c["img"]: path_votes[exp][set_path(c["img"])] += 1
 exact_ids = sorted(images)
+variants = {}
+for c in cards:
+    for pid, label in (c.get("var") or {}).items():
+        if label: variants[pid] = label      # leeg = gewone kaart, dus niet opslaan
 exact = len(images)
 
 # --- 2/3. naam (+ aanvallen)
@@ -75,11 +79,23 @@ for e, v in fuzzy_votes.items():
         sets[str(e)] = name
         set_paths[str(e)] = fuzzy_paths[e].most_common(1)[0][0]
 
+# Hoofdsets (Engelse set): per setnaam de expansions met minstens 50% exacte koppelingen; heeft een set geen exacte
+# koppelingen, dan het grootste deel. De rest (Japans, promo-delen, andere uitvoeringen) wordt in de app apart gehouden.
+exact_set = set(exact_ids)
+exp_total = Counter(p["idExpansion"] for p in products)
+exp_exact = Counter(p["idExpansion"] for p in products if p["idProduct"] in exact_set)
+by_name = defaultdict(list)
+for e, n in sets.items(): by_name[n].append(int(e))
+main = []
+for n, ids in by_name.items():
+    strong = [e for e in ids if exp_exact[e] / exp_total[e] >= 0.5]
+    main += strong if strong else [max(ids, key=lambda e: exp_total[e])]
+main = sorted(main)
 set_dates = {path: set_dates_by_id[path.rsplit("/", 1)[1]] for path in set(set_paths.values()) if path.rsplit("/", 1)[1] in set_dates_by_id}
-json.dump({"sets": sets, "setPaths": set_paths, "setDates": set_dates,
+json.dump({"sets": sets, "setPaths": set_paths, "setDates": set_dates, "variants": variants, "main": main,
            "images": {str(k): v for k, v in images.items()}, "exact": exact_ids},
           open("Cards/Resources/cardmap.json", "w"), separators=(",", ":"))
 total = len(products)
 print(f"images: {len(images)}/{total} ({100*len(images)/total:.1f}%), waarvan exact {exact}; "
       f"sets: {len(sets)}/{len(size)} expansions, producten met setnaam: "
-      f"{100*sum(size[int(e)] for e in sets)/total:.0f}%, logo's: {len(set_paths)}, datums: {len(set_dates)}")
+      f"{100*sum(size[int(e)] for e in sets)/total:.0f}%, logo's: {len(set_paths)}, datums: {len(set_dates)}, varianten: {len(variants)}, hoofdsets: {len(main)}")

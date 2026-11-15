@@ -144,7 +144,10 @@ final class WatchStore {
         }
     }
 
+    func reload() { load() }
+
     private func save() {
         if let data = try? JSONEncoder().encode(entries) { try? data.write(to: fileURL, options: .atomic) }
+        CloudSync.shared.localChanged("watchlist.json")
     }
 }

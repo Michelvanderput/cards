@@ -15,6 +15,7 @@ struct CardItem: Identifiable, Codable, Hashable {
     let id: Int          // Cardmarket idProduct
     let name: String
     let expansionId: Int
+    var metaID: Int?          // Cardmarket idMetacard: dezelfde kaart, ook als er meerdere producten (varianten) zijn
     var normal: PriceSet
     var holo: PriceSet
 
@@ -46,6 +47,7 @@ struct RawProducts: Decodable {
         let idProduct: Int
         let name: String
         let idExpansion: Int
+        let idMetacard: Int?
     }
     let products: [Product]
 }

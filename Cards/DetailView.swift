@@ -24,6 +24,26 @@ struct DetailView: View {
             .listRowBackground(Color.clear)
             .listRowInsets(.init())
 
+            let siblings = catalog.variants(of: current)
+            if siblings.count > 1 {
+                Section {
+                    ForEach(siblings) { v in
+                        NavigationLink(value: v) {
+                            HStack {
+                                CardImage(item: v).frame(width: 34)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(catalog.variantLabel(for: v) ?? "Gewone kaart")
+                                    if v.id == item.id { Text("Deze uitvoering").font(.caption).foregroundStyle(.secondary) }
+                                }
+                                Spacer()
+                                Text(euro(v.mainPrice)).monospacedDigit().foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } header: { Text("Uitvoeringen in deze set") } footer: {
+                    Text("Cardmarket heeft voor deze kaart meerdere producten, bijvoorbeeld normaal, reverse holo of een ander patroon. Elk heeft een eigen prijs.")
+                }
+            }
             Section("Prijsverloop (trend)") {
                 let pts = history.points[item.id] ?? []
                 if pts.count >= 2 {

@@ -9,16 +9,24 @@ settings:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.1"
     CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: 85CDCL9Q43
+    CODE_SIGN_STYLE: Automatic
 targets:
   Cards:
     type: application
     supportedDestinations: [iOS, macOS]
-    sources: [Cards]
+    sources: [Cards, Shared]
+    dependencies:
+      - target: CardsWidget
     entitlements:
       path: Cards/Cards.entitlements
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
+        com.apple.developer.icloud-container-identifiers: [iCloud.nl.michelvanderput.cards]
+        com.apple.developer.icloud-services: [CloudDocuments]
+        com.apple.developer.ubiquity-container-identifiers: [iCloud.nl.michelvanderput.cards]
+        com.apple.security.application-groups: [group.nl.michelvanderput.cards]
     info:
       path: Cards/Info.plist
       properties:
@@ -34,6 +42,26 @@ targets:
         DEVELOPMENT_TEAM: 85CDCL9Q43
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  CardsWidget:
+    type: app-extension
+    supportedDestinations: [iOS, macOS]
+    sources: [Widget, Shared]
+    entitlements:
+      path: Widget/CardsWidget.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.application-groups: [group.nl.michelvanderput.cards]
+    info:
+      path: Widget/Info.plist
+      properties:
+        CFBundleDisplayName: Cards
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: nl.michelvanderput.cards.widget
+        SKIP_INSTALL: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
   CardsTests:
     type: bundle.unit-test
     supportedDestinations: [iOS, macOS]

@@ -13,6 +13,7 @@ struct SearchView: View {
     @State private var onlyPriced = false
     @State private var showSettings = false
     @AppStorage("gridMode") private var gridMode = true
+    @AppStorage("groupVariants") private var groupVariants = true
 
     private func results(from all: [CardItem]) -> [CardItem] {
         var out = all
@@ -23,6 +24,7 @@ struct SearchView: View {
         case .priceAsc: out.sort { ($0.mainPrice ?? .infinity) < ($1.mainPrice ?? .infinity) }
         case .name: out.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         }
+        if groupVariants { out = catalog.collapse(out) }
         return Array(out.prefix(300))
     }
 

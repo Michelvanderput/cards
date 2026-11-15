@@ -3,22 +3,38 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .defaultValue
     @AppStorage("autoCheck") private var autoCheck = true
+    @AppStorage("groupVariants") private var groupVariants = true
     @Environment(CatalogStore.self) private var catalog
     @Environment(AppSettings.self) private var settings
     @Environment(CardmarketSession.self) private var session
     @State private var imageBytes: Int64 = 0
     @State private var showLogin = false
+    @State private var sync = CloudSync.shared
 
     var body: some View {
         @Bindable var settings = settings
         NavigationStack {
             Form {
                 Section {
+                    Toggle("Synchroniseer via iCloud", isOn: Binding(get: { sync.isEnabled }, set: { sync.isEnabled = $0 }))
+                    LabeledContent("Status", value: syncStatus)
+                    if sync.isEnabled { Button("Nu synchroniseren") { Task { await sync.syncAll() } } }
+                } header: { Text("iCloud") } footer: {
+                    Text("Collectie, watchlist, binders en prijsgeschiedenis worden gelijkgehouden tussen je Mac en iPhone (zelfde Apple ID, iCloud Drive aan). Wijzigingen op beide apparaten tegelijk worden samengevoegd. Prijzen en plaatjes worden per apparaat opgehaald.")
+                }
+
+                Section {
                     LabeledContent("Status", value: session.isLoggedIn ? "Ingelogd\(session.username.map { " (\($0))" } ?? "")" : "Niet ingelogd")
                     Button(session.isLoggedIn ? "Account beheren" : "Inloggen bij Cardmarket") { showLogin = true }
                     NavigationLink("Mijn aanbod beoordelen (experimenteel)") { MyStockView() }
                 } header: { Text("Cardmarket-account") } footer: {
                     Text("Je logt zelf in op Cardmarket in een webweergave; de app ziet je wachtwoord niet. De sessie blijft bewaard zolang Cardmarket dat toestaat. Cardmarket biedt geen API meer aan, dus de app leest pagina's uit zoals een browser dat doet.")
+                }
+
+                Section {
+                    Toggle("Uitvoeringen van een kaart groeperen", isOn: $groupVariants)
+                } header: { Text("Weergave") } footer: {
+                    Text("Aan: één tegel per kaart, met een label als \"2 uitvoeringen\". Uit: elk Cardmarket-product apart, zoals normaal, reverse holo of een ander patroon.")
                 }
 
                 Section {
@@ -89,6 +105,16 @@ struct SettingsView: View {
             .navigationTitle("Instellingen")
             .task { imageBytes = await ImageStore.shared.diskBytes() }
             .sheet(isPresented: $showLogin) { LoginSheet() }
+        }
+    }
+
+    private var syncStatus: String {
+        switch sync.status {
+        case .off: "Uit"
+        case .unavailable: "iCloud niet beschikbaar (log in bij iCloud en zet iCloud Drive aan)"
+        case .syncing: "Bezig…"
+        case .upToDate(let d): "Bijgewerkt \(d.formatted(.relative(presentation: .named)))"
+        case .failed(let m): "Fout: \(m)"
         }
     }
 
