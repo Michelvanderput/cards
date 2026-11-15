@@ -26,14 +26,35 @@ final class DealTests: XCTestCase {
         XCTAssertTrue([Deal.fair, .expensive, .good].contains(dear.level))
     }
 
-    func testShippingUsesTrackedAboveThreshold() {
+    func testOfficialShippingTableForNetherlands() {
+        let s = settings()   // thuisland Nederland
+        XCTAssertEqual(s.shipping(from: "Netherlands", price: 10), 1.70, accuracy: 0.001)       // brief tot 4 kaarten
+        XCTAssertEqual(s.shipping(from: "Germany", price: 10), 1.55, accuracy: 0.001)
+        XCTAssertEqual(s.shipping(from: "Germany", price: 60), 15.49, accuracy: 0.001)         // boven €25: aangetekend
+        XCTAssertEqual(s.shipping(from: "Netherlands", price: 60), 6.20, accuracy: 0.001)
+        XCTAssertEqual(s.shipping(from: "Germany", price: 20, cards: 10), 7.99, accuracy: 0.001) // 5–17 kaarten: tot 50 g
+        let q = s.quote(from: "Finland", price: 12)
+        XCTAssertEqual(q?.days, 9)
+        XCTAssertEqual(q?.official, true)
+        XCTAssertEqual(q?.tracked, false)
+        XCTAssertEqual(s.quote(from: "Finland", price: 40)?.tracked, true)
+    }
+
+    func testFallbackEstimatesForOtherHomeCountry() {
         let s = settings()
-        XCTAssertEqual(s.shipping(from: "Netherlands", price: 20), s.shipDomestic)
-        XCTAssertEqual(s.shipping(from: "Netherlands", price: 25.01), s.shipDomesticTracked)
+        s.homeCountry = "Belgium"
+        XCTAssertEqual(s.shipping(from: "Belgium", price: 10), s.shipDomestic)
+        XCTAssertEqual(s.shipping(from: "Belgium", price: 25.01), s.shipDomesticTracked)
         XCTAssertEqual(s.shipping(from: "Germany", price: 10), s.shipEU)
         XCTAssertEqual(s.shipping(from: "Japan", price: 10), s.shipWorld)
+        XCTAssertEqual(s.quote(from: "Germany", price: 10)?.official, false)
         s.includeShipping = false
         XCTAssertEqual(s.shipping(from: "Germany", price: 10), 0)
+    }
+
+    func testShippingTableLoadsAllCountries() {
+        XCTAssertEqual(ShippingTable.shared?.countries.count, 34)
+        XCTAssertEqual(ShippingTable.shared?.destination, "Netherlands")
     }
 
     func testForeignListingCostsMoreInTotal() {

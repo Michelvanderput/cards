@@ -163,7 +163,7 @@ struct BundleView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         let separate = b.cards.reduce(0) { $0 + settings.shipping(from: b.country, price: $1.price) }
-                        let combined = settings.shipping(from: b.country, price: b.sum)
+                        let combined = settings.shipping(from: b.country, price: b.sum, cards: b.count)
                         HStack {
                             Text("Totaal \(euro(b.sum))").fontWeight(.medium)
                             Spacer()

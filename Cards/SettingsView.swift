@@ -32,13 +32,21 @@ struct SettingsView: View {
                         ForEach(AppSettings.countryChoices, id: \.self) { Text("\(AppSettings.flag($0)) \($0)").tag($0) }
                     }
                     Toggle("Verzending meetellen in de dealscore", isOn: $settings.includeShipping)
-                    money("Binnenland, brief", $settings.shipDomestic)
-                    money("Binnenland, aangetekend (boven €25)", $settings.shipDomesticTracked)
-                    money("EU, brief", $settings.shipEU)
-                    money("EU, aangetekend (boven €25)", $settings.shipEUTracked)
-                    money("Buiten de EU", $settings.shipWorld)
-                } header: { Text("Verzendkosten (schatting)") } footer: {
-                    Text("Startwaarden zijn schattingen: Cardmarket berekent de echte kosten per verkoper, land en gewicht. Boven €25 is aangetekend verzenden verplicht. Pas de bedragen aan naar wat jij betaalt.")
+                    if settings.homeCountry == ShippingTable.shared?.destination {
+                        NavigationLink("Verzendkosten per land (officieel)") { ShippingCountriesView() }
+                    } else {
+                        money("Binnenland, brief", $settings.shipDomestic)
+                        money("Binnenland, aangetekend (boven €25)", $settings.shipDomesticTracked)
+                        money("EU, brief", $settings.shipEU)
+                        money("EU, aangetekend (boven €25)", $settings.shipEUTracked)
+                        money("Buiten de EU", $settings.shipWorld)
+                    }
+                } header: { Text("Verzendkosten") } footer: {
+                    if settings.homeCountry == ShippingTable.shared?.destination {
+                        Text("Voor Nederland gebruikt de app de officiële Cardmarket-tarieven per land van herkomst, op basis van het aantal kaarten en de waarde. Boven €25 is aangetekend verzenden verplicht.")
+                    } else {
+                        Text("Voor andere landen dan Nederland zijn dit schattingen die je zelf aanpast: Cardmarket berekent de echte kosten per verkoper, land en gewicht. Boven €25 is aangetekend verzenden verplicht.")
+                    }
                 }
 
                 Section {

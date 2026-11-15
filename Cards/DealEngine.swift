@@ -34,7 +34,8 @@ enum DealEngine {
 
         var out: [UUID: DealScore] = [:]
         for l in listings {
-            let ship = settings.shipping(from: l.country, price: l.price)
+            let quote = settings.quote(from: l.country, price: l.price)
+            let ship = quote?.price ?? 0
             let total = totals[l.id] ?? l.price
             let ref = medians[l.variantKey] ?? medians[l.condition] ?? overall
             var factors: [DealScore.Factor] = []
@@ -63,8 +64,10 @@ enum DealEngine {
 
             // Verzending en herkomst
             let from = l.country.isEmpty ? "onbekend land" : l.country
-            if settings.includeShipping, ship > 0 {
-                factors.append(.init(text: "Uit \(from): ≈ \(euro(ship)) verzending", positive: l.country == settings.homeCountry ? true : nil))
+            if let quote, ship > 0 {
+                let kind = quote.tracked ? "aangetekend" : "brief"
+                let source = quote.official ? "Cardmarket-tarief" : "schatting"
+                factors.append(.init(text: "Uit \(from): \(euro(ship)) verzending (\(kind), \(source))", positive: l.country == settings.homeCountry ? true : nil))
             } else {
                 factors.append(.init(text: "Uit \(from)", positive: nil))
             }
@@ -87,7 +90,7 @@ enum DealEngine {
             // Foto en levertijd
             if l.hasPhoto { score += 4; factors.append(.init(text: "Foto van de echte kaart", positive: true)) }
             else { factors.append(.init(text: "Geen foto van de kaart", positive: nil)) }
-            if let d = l.deliveryDays {
+            if let d = l.deliveryDays ?? quote?.days {
                 if d <= 3 { score += 2; factors.append(.init(text: "Snel geleverd (≈ \(d) dagen)", positive: true)) }
                 else if d > 10 { score -= 3; factors.append(.init(text: "Lange levertijd (≈ \(d) dagen)", positive: false)) }
                 else { factors.append(.init(text: "Levertijd ≈ \(d) dagen", positive: nil)) }
