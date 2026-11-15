@@ -29,6 +29,7 @@ for c in cards:
         if c["img"]: images[pid] = c["img"]
         if pid in prod_exp: votes[prod_exp[pid]][set_names[c["set"]]] += 1
 exact = len(images)
+exact_ids = sorted(images)   # alleen deze producten zijn exact gekoppeld (TCGdex kent het Cardmarket-id)
 
 # --- 2. naam + aanvallen
 by_base = defaultdict(list)
@@ -56,7 +57,7 @@ for e, v in fuzzy_votes.items():
     name, n = v.most_common(1)[0]
     if n >= 5 and n / size[e] >= 0.6: sets[str(e)] = name
 
-json.dump({"sets": sets, "images": {str(k): v for k, v in images.items()}},
+json.dump({"sets": sets, "images": {str(k): v for k, v in images.items()}, "exact": exact_ids},
           open("Cards/Resources/cardmap.json", "w"), separators=(",", ":"))
 total = len(products)
 print(f"images: {len(images)}/{total} ({100*len(images)/total:.0f}%), waarvan exact {exact}; "

@@ -5,6 +5,7 @@ import Foundation
 struct CardMap {
     var sets: [Int: String] = [:]      // idExpansion -> setnaam
     var images: [Int: String] = [:]    // idProduct -> TCGdex-pad, bv. "en/base/base1/4"
+    var exact: Set<Int> = []           // producten waarvan TCGdex het Cardmarket-id kent (betrouwbare koppeling)
 
     static let empty = CardMap()
 
@@ -14,12 +15,20 @@ struct CardMap {
               let raw = try? JSONDecoder().decode(Raw.self, from: data) else { return .empty }
         return CardMap(
             sets: Dictionary(uniqueKeysWithValues: raw.sets.compactMap { k, v in Int(k).map { ($0, v) } }),
-            images: Dictionary(uniqueKeysWithValues: raw.images.compactMap { k, v in Int(k).map { ($0, v) } }))
+            images: Dictionary(uniqueKeysWithValues: raw.images.compactMap { k, v in Int(k).map { ($0, v) } }),
+            exact: Set(raw.exact ?? []))
     }
 
     private struct Raw: Decodable {
         let sets: [String: String]
         let images: [String: String]
+        let exact: [Int]?
+    }
+
+    /// TCGdex-kaart-id (bv. "base1-4") voor exact gekoppelde producten.
+    func tcgdexCardID(for productID: Int) -> String? {
+        guard exact.contains(productID), let parts = images[productID]?.split(separator: "/"), parts.count >= 4 else { return nil }
+        return "\(parts[parts.count - 2])-\(parts[parts.count - 1])"
     }
 
     enum Quality: String { case low, high }

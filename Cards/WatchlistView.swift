@@ -62,6 +62,7 @@ struct WatchlistView: View {
 struct CheckSheet: View {
     @Environment(WatchStore.self) private var watch
     @Environment(ConditionChecker.self) private var checker
+    @Environment(MarketStore.self) private var market
     @Environment(\.dismiss) private var dismiss
     @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .all
 
@@ -90,11 +91,11 @@ struct CheckSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Sluit") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Start") { Task { await checker.run(watch: watch, language: languageFilter, interactive: true) } }
+                    Button("Start") { Task { await checker.run(watch: watch, language: languageFilter, market: market, interactive: true) } }
                         .disabled(checker.isRunning)
                 }
             }
-            .task { await checker.run(watch: watch, language: languageFilter, interactive: true) }
+            .task { await checker.run(watch: watch, language: languageFilter, market: market, interactive: true) }
         }
         #if os(macOS)
         .frame(minWidth: 520, minHeight: 520)

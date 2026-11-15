@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ListingsView: View {
     let item: CardItem
+    @Environment(MarketStore.self) private var market
     @State private var loader = ListingsLoader()
     @State private var minCondition: Condition? = nil
     @State private var language: String? = nil
@@ -18,6 +19,7 @@ struct ListingsView: View {
             .compactMap { code, items in items.min { $0.price < $1.price }.map { (code, $0) } }
             .sorted { Condition.order($0.0) < Condition.order($1.0) }
     }
+    private var medians: [String: Double] { DealAnalyzer.medians(of: filtered) }
     private var needsCheck: Bool { loader.status == .needsCheck }
 
     var body: some View {
@@ -40,6 +42,9 @@ struct ListingsView: View {
         .navigationTitle("Aanbiedingen")
         .onAppear { loader.load(productID: item.id, minCondition: minCondition, language: languageFilter) }
         .onChange(of: minCondition) { _, new in loader.load(productID: item.id, minCondition: new, language: languageFilter) }
+        .onChange(of: loader.status) { _, new in
+            if new == .done { market.recordListings(id: item.id, minCondition: minCondition, listings: loader.listings) }
+        }
         .onDisappear { loader.stop() }
     }
 
@@ -77,7 +82,7 @@ struct ListingsView: View {
                         LabeledContent(code, value: euro(l.price))
                     }
                 }
-                Section("Aanbiedingen (\(filtered.count))") {
+                Section {
                     ForEach(filtered) { l in
                         HStack {
                             Text(l.condition).font(.caption.bold()).padding(.horizontal, 6).padding(.vertical, 2)
@@ -87,9 +92,19 @@ struct ListingsView: View {
                                 Text("\(l.country) · \(l.language) · \(l.quantity)×").font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Text(euro(l.price)).monospacedDigit()
+                            VStack(alignment: .trailing) {
+                                Text(euro(l.price)).monospacedDigit()
+                                if let ref = medians[l.condition] {
+                                    let deal = DealAnalyzer.rate(price: l.price, reference: ref)
+                                    Text(deal.label).font(.caption2.bold()).foregroundStyle(deal.color)
+                                }
+                            }
                         }
                     }
+                } header: {
+                    Text("Aanbiedingen (\(filtered.count))")
+                } footer: {
+                    Text("De beoordeling vergelijkt een aanbieding met de mediaan van aanbiedingen in dezelfde staat op deze pagina.")
                 }
             }
             .opacity(loader.status == .loading ? 0.45 : 1)

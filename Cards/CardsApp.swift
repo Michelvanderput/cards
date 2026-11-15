@@ -18,6 +18,7 @@ struct CardsApp: App {
     @State private var watch = WatchStore()
     @State private var history = HistoryStore()
     @State private var checker = ConditionChecker()
+    @State private var market = MarketStore()
     @AppStorage("autoCheck") private var autoCheck = true
     @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .all
     @Environment(\.scenePhase) private var scenePhase
@@ -35,6 +36,7 @@ struct CardsApp: App {
                 .environment(watch)
                 .environment(history)
                 .environment(checker)
+                .environment(market)
                 .task {
                     await refreshAll()
                     #if os(macOS)
@@ -70,7 +72,7 @@ struct CardsApp: App {
     private func refreshAll() async {
         await refreshPrices()
         if autoCheck {
-            await checker.run(watch: watch, language: languageFilter, interactive: false, minimumAge: 15 * 60)
+            await checker.run(watch: watch, language: languageFilter, market: market, interactive: false, minimumAge: 15 * 60)
         }
     }
 

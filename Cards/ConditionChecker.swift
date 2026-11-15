@@ -18,7 +18,7 @@ final class ConditionChecker {
     var needsCheckNow: Bool { loader.status == .needsCheck }
 
     /// - Parameter interactive: true = de gebruiker kijkt mee en kan een beveiligingscontrole aantikken.
-    func run(watch: WatchStore, language: LanguageFilter, interactive: Bool, minimumAge: TimeInterval = 0) async {
+    func run(watch: WatchStore, language: LanguageFilter, market: MarketStore? = nil, interactive: Bool, minimumAge: TimeInterval = 0) async {
         guard !isRunning else { return }
         let due = watch.conditionEntries.filter {
             minimumAge == 0 || $0.lastChecked.map { Date().timeIntervalSince($0) > minimumAge } ?? true
@@ -47,6 +47,7 @@ final class ConditionChecker {
                 let cheapest = loader.listings
                     .filter { Condition.order($0.condition) <= cond.level }
                     .map(\.price).min()
+                market?.recordListings(id: entry.id, minCondition: cond, listings: loader.listings)
                 await watch.applyConditionResult(id: entry.id, cheapest: cheapest)
             }
             done += 1

@@ -6,6 +6,7 @@ struct DetailView: View {
     @Environment(CatalogStore.self) private var catalog
     @Environment(WatchStore.self) private var watch
     @Environment(HistoryStore.self) private var history
+    @Environment(MarketStore.self) private var market
     @State private var showAlert = false
 
     private var current: CardItem { catalog.byID[item.id] ?? item }
@@ -35,6 +36,28 @@ struct DetailView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
+            Section {
+                LabeledContent("Cardmarket (trend, alle staten)", value: euro(current.mainPrice))
+                if let tcg = market.tcgplayerEUR(item.id) {
+                    LabeledContent("TCGplayer (marktprijs, VS)", value: euro(tcg))
+                    if let cm = current.mainPrice, tcg > 0 {
+                        let diff = (cm - tcg) / tcg
+                        LabeledContent("Cardmarket t.o.v. TCGplayer", value: diff.formatted(.percent.precision(.fractionLength(0)).sign(strategy: .always())))
+                    }
+                } else if catalog.map.exact.contains(item.id) {
+                    Text("Geen TCGplayer-prijs gevonden voor deze variant.").font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    Text("Voor deze kaart is geen betrouwbare koppeling met andere platforms.").font(.footnote).foregroundStyle(.secondary)
+                }
+                if let s = market.stats(item.id, minCondition: nil) ?? market.stats(item.id, minCondition: .nm) {
+                    LabeledContent("Aanbiedingen: goedkoopste", value: euro(s.min))
+                    LabeledContent("Aanbiedingen: mediaan (\(s.count))", value: euro(s.median))
+                }
+            } header: {
+                Text("Prijsvergelijking")
+            } footer: {
+                Text("TCGplayer-prijzen zijn de Amerikaanse markt (USD, omgerekend met de ECB-koers) en alleen indicatief: verzend- en invoerkosten en de staat verschillen.")
+            }
             Section("Cardmarket-gemiddelde, alle staten (EUR)") { rows(current.normal) }
             if !current.holo.isEmpty {
                 Section("Holo / foil") { rows(current.holo) }
@@ -55,6 +78,7 @@ struct DetailView: View {
         }
         .navigationTitle(item.name)
         .onAppear { history.record(id: item.id, price: current.mainPrice) }
+        .task { await market.fetchCrossMarket(item: item, map: catalog.map) }
         .sheet(isPresented: $showAlert) { AlertSheet(item: current) }
     }
 
@@ -72,6 +96,7 @@ struct DetailView: View {
 struct AlertSheet: View {
     let item: CardItem
     @Environment(WatchStore.self) private var watch
+    @Environment(MarketStore.self) private var market
     @Environment(\.dismiss) private var dismiss
     @State private var direction: AlertDirection = .below
     @State private var condition: Condition? = nil
@@ -94,6 +119,12 @@ struct AlertSheet: View {
                     #if os(iOS)
                     .keyboardType(.decimalPad)
                     #endif
+                if let sug = DealAnalyzer.suggestion(item: item, minCondition: condition, market: market), condition != nil || direction == .below {
+                    Section("Voorstel") {
+                        Button("Gebruik \(euro(sug.price))") { target = sug.price }
+                        Text(sug.basis).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
                 Section {
                     Text("Nu (trend, alle staten): \(euro(item.mainPrice))").foregroundStyle(.secondary)
                     if condition != nil {
