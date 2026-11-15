@@ -6,18 +6,74 @@ import Observation
 @MainActor
 @Observable
 final class RateLimitState {
-    static var shared = RateLimitState()
+    static var shared = RateLimitState(syncFile: URL.applicationSupportDirectory.appending(path: "Cards/ratelimit.json"))
+
+    /// De pauzestand zoals hij tussen apparaten wordt gedeeld. De nieuwste (`updated`) wint.
+    struct Snapshot: Codable, Equatable {
+        var until: Date?
+        var strikes: Int
+        var last: Date?
+        var updated: Date
+    }
 
     private(set) var until: Date?
     private var strikes = 0
     private var lastStrike: Date?
+    private var updated = Date.distantPast
     private let defaults: UserDefaults
+    private let syncFile: URL?
 
-    init(defaults: UserDefaults = .standard) {
+    /// - Parameter syncFile: bestand dat via iCloud tussen je apparaten wordt gedeeld (alleen voor de echte app, niet in tests).
+    init(defaults: UserDefaults = .standard, syncFile: URL? = nil) {
         self.defaults = defaults
+        self.syncFile = syncFile
         until = defaults.object(forKey: "rateLimit.until") as? Date
         strikes = defaults.integer(forKey: "rateLimit.strikes")
         lastStrike = defaults.object(forKey: "rateLimit.last") as? Date
+        updated = defaults.object(forKey: "rateLimit.updated") as? Date ?? .distantPast
+        reloadFromFile()
+    }
+
+    var snapshot: Snapshot { Snapshot(until: until, strikes: strikes, last: lastStrike, updated: updated) }
+
+    /// Neemt een stand van een ander apparaat over als die nieuwer is dan de onze.
+    func apply(_ remote: Snapshot) {
+        guard remote.updated > updated else { return }
+        until = remote.until
+        strikes = remote.strikes
+        lastStrike = remote.last
+        updated = remote.updated
+        saveLocally()
+    }
+
+    /// Laadt de gedeelde stand uit het bestand (na een wijziging van een ander apparaat).
+    func reloadFromFile() {
+        guard let syncFile, let data = try? Data(contentsOf: syncFile),
+              let remote = try? Self.decoder.decode(Snapshot.self, from: data) else { return }
+        apply(remote)
+    }
+
+    nonisolated static var decoder: JSONDecoder { let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d }
+    nonisolated static func encode(_ snapshot: Snapshot) -> Data? {
+        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601
+        return try? e.encode(snapshot)
+    }
+
+    private func saveLocally() {
+        defaults.set(until, forKey: "rateLimit.until")
+        defaults.set(strikes, forKey: "rateLimit.strikes")
+        defaults.set(lastStrike, forKey: "rateLimit.last")
+        defaults.set(updated, forKey: "rateLimit.updated")
+    }
+
+    private func persist(now: Date) {
+        updated = now
+        saveLocally()
+        if let syncFile, let data = Self.encode(snapshot) {
+            try? FileManager.default.createDirectory(at: syncFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: syncFile, options: .atomic)
+            CloudSync.shared.localChanged("ratelimit.json")
+        }
     }
 
     /// Wachttijd na de n-de blokkade vlak achter elkaar: 10, 20, 40 minuten, maximaal 1 uur.
@@ -40,14 +96,15 @@ final class RateLimitState {
         strikes += 1
         lastStrike = now
         until = now.addingTimeInterval(Self.cooldown(strikes: strikes))
-        defaults.set(until, forKey: "rateLimit.until")
-        defaults.set(strikes, forKey: "rateLimit.strikes")
-        defaults.set(lastStrike, forKey: "rateLimit.last")
+        persist(now: now)
     }
 
-    func clear() {
+    /// Heft de pauze op (bijvoorbeeld als Cardmarket in je browser weer gewoon werkt). Geldt ook voor je andere apparaten.
+    func clear(now: Date = Date()) {
         until = nil
-        defaults.removeObject(forKey: "rateLimit.until")
+        strikes = 0
+        lastStrike = nil
+        persist(now: now)
     }
 
     var message: String {

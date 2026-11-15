@@ -20,6 +20,21 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
+                    LabeledContent("Status") {
+                        if RateLimitState.shared.isCoolingDown, let until = RateLimitState.shared.until {
+                            Text("Gepauzeerd tot \(until.formatted(date: .omitted, time: .shortened))").foregroundStyle(.orange)
+                        } else {
+                            Text("Normaal").foregroundStyle(.green)
+                        }
+                    }
+                    if RateLimitState.shared.isCoolingDown {
+                        Button("Pauze opheffen") { RateLimitState.shared.clear() }
+                    }
+                } header: { Text("Cardmarket-verzoeken") } footer: {
+                    Text("Beperkt Cardmarket het aantal verzoeken (Cloudflare 1015), dan pauzeert de app automatisch en dat geldt via iCloud voor al je apparaten. Heft de pauze alleen op als Cardmarket in je browser weer gewoon werkt: nieuwe verzoeken tijdens een blokkade verlengen die.")
+                }
+
+                Section {
                     Toggle("Synchroniseer via iCloud", isOn: Binding(get: { sync.isEnabled }, set: { sync.isEnabled = $0 }))
                     LabeledContent("Status", value: syncStatus)
                     if sync.isEnabled { Button("Nu synchroniseren") { Task { await sync.syncAll() } } }

@@ -175,6 +175,55 @@ final class ScanSafetyTests: XCTestCase {
         XCTAssertFalse(checker.isResting)
     }
 
+    // MARK: - Gedeelde pauzestand (iCloud)
+
+    private func freshState() -> RateLimitState { RateLimitState(defaults: UserDefaults(suiteName: "cards-tests-\(UUID().uuidString)")!) }
+
+    func testBlockOnOneDevicePausesTheOther() {
+        let mac = freshState(), phone = freshState()
+        XCTAssertFalse(phone.isCoolingDown)
+        mac.register()
+        phone.apply(mac.snapshot)                                  // wat via iCloud binnenkomt
+        XCTAssertTrue(phone.isCoolingDown)
+        XCTAssertEqual(phone.until, mac.until)
+        XCTAssertEqual(phone.paceFactor, mac.paceFactor)
+    }
+
+    func testNewestStateWinsAndClearingSpreads() {
+        let mac = freshState(), phone = freshState()
+        let t0 = Date()
+        mac.register(now: t0)
+        phone.apply(mac.snapshot)
+        phone.clear(now: t0 + 60)                                  // jij heft de pauze op de iPhone op
+        mac.apply(phone.snapshot)
+        XCTAssertFalse(mac.isCoolingDown, "het opheffen geldt ook voor de Mac")
+        // Een oudere stand overschrijft een nieuwere nooit.
+        let old = RateLimitState.Snapshot(until: Date().addingTimeInterval(600), strikes: 1, last: t0, updated: t0)
+        mac.apply(old)
+        XCTAssertFalse(mac.isCoolingDown)
+    }
+
+    func testSyncMergeKeepsTheNewestRateLimitFile() throws {
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let older = RateLimitState.Snapshot(until: t0 + 600, strikes: 1, last: t0, updated: t0)
+        let newer = RateLimitState.Snapshot(until: nil, strikes: 0, last: nil, updated: t0 + 120)
+        let a = try XCTUnwrap(RateLimitState.encode(older)), b = try XCTUnwrap(RateLimitState.encode(newer))
+        let merged = try XCTUnwrap(SyncMerge.merge(file: "ratelimit.json", local: a, remote: b))
+        XCTAssertEqual(try RateLimitState.decoder.decode(RateLimitState.Snapshot.self, from: merged), newer)
+        let merged2 = try XCTUnwrap(SyncMerge.merge(file: "ratelimit.json", local: b, remote: a))
+        XCTAssertEqual(try RateLimitState.decoder.decode(RateLimitState.Snapshot.self, from: merged2), newer, "volgorde maakt niet uit")
+        XCTAssertTrue(CloudSync.files.contains("ratelimit.json"))
+    }
+
+    func testClearLiftsThePauseLocally() {
+        let st = freshState()
+        st.register()
+        XCTAssertTrue(st.isCoolingDown)
+        st.clear()
+        XCTAssertFalse(st.isCoolingDown)
+        XCTAssertEqual(st.paceFactor, 1)
+    }
+
     func testRequestGateSpacesLoadsOut() async {
         await RequestGate.shared.configure(minimum: 0.3, jitter: 0)
         let t0 = Date()

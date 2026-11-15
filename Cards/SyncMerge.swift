@@ -31,6 +31,11 @@ enum SyncMerge {
         case "collection.json": return combine(CollectionEntry.self, local, remote, base, encoder) { $0.id }
         case "binders.json": return combine(Binder.self, local, remote, base, encoder) { $0.id }
         case "watchlist.json": return combine(WatchEntry.self, local, remote, base, encoder) { $0.id }
+        case "ratelimit.json":
+            // Pauzestand: de nieuwste versie wint.
+            guard let l = try? RateLimitState.decoder.decode(RateLimitState.Snapshot.self, from: local),
+                  let r = try? RateLimitState.decoder.decode(RateLimitState.Snapshot.self, from: remote) else { return nil }
+            return RateLimitState.encode(l.updated > r.updated ? l : r)
         case "history.json":
             guard let l = try? JSONDecoder().decode([Int: [PricePoint]].self, from: local),
                   let r = try? JSONDecoder().decode([Int: [PricePoint]].self, from: remote) else { return nil }

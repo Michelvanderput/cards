@@ -13,7 +13,7 @@ final class CloudSync {
 
     static let shared = CloudSync()
     nonisolated static let containerID = "iCloud.nl.michelvanderput.cards"
-    static let files = ["collection.json", "watchlist.json", "binders.json", "history.json"]
+    static let files = ["collection.json", "watchlist.json", "binders.json", "history.json", "ratelimit.json"]
 
     private(set) var status: Status = .off
     /// Wordt aangeroepen als een bestand door een ander apparaat is bijgewerkt; de stores laden dan opnieuw.

@@ -86,6 +86,7 @@ struct CardsApp: App {
                         case "watchlist.json": watch.reload()
                         case "binders.json": binders.reload()
                         case "history.json": history.reload()
+                        case "ratelimit.json": RateLimitState.shared.reloadFromFile()
                         default: break
                         }
                     }
