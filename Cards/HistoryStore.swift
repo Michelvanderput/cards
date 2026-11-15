@@ -12,6 +12,8 @@ struct PricePoint: Codable, Identifiable, Hashable {
 @Observable
 final class HistoryStore {
     private(set) var points: [Int: [PricePoint]] = [:]
+    /// Reeks voor de totale collectiewaarde.
+    static let portfolioID = -1
 
     init() { load() }
 

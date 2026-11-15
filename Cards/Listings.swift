@@ -12,6 +12,17 @@ struct Listing: Identifiable, Hashable {
     let quantity: Int
     let seller: String
     let country: String
+    var sellerRating: String = ""     // outstanding, verygood, good, ...
+    var sales: Int? = nil             // aantal verkopen van de verkoper
+    var availableItems: Int? = nil
+    var deliveryDays: Int? = nil      // geschatte levertijd naar jou
+    var hasPhoto: Bool = false        // verkoper heeft een foto van deze kaart geplaatst
+    var comment: String = ""          // opmerking van de verkoper
+    var flags: Set<String> = []       // reverse, first, signed, altered, foil
+
+    /// Aanbiedingen zijn pas vergelijkbaar bij dezelfde staat én dezelfde variant.
+    var variantKey: String { "\(condition)|" + flags.sorted().joined(separator: ",") }
+    var isStandardVariant: Bool { flags.isEmpty }
 }
 
 enum Condition: String, CaseIterable, Identifiable, Codable {
@@ -128,7 +139,7 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
     }
 
     private struct Page: Decodable {
-        struct Row: Decodable { let cond, lang, price, qty, seller, loc: String }
+        struct Row: Decodable { let cond, lang, price, qty, seller, loc, rating, salesTitle, deliveryTitle, comment: String; let photo: Bool; let flags: [String] }
         let title: String
         let challenge: Bool   // Cloudflare-controle (taalonafhankelijk herkend)
         let real: Bool        // echte Cardmarket-productpagina
@@ -140,8 +151,13 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
             .replacingOccurrences(of: ".", with: "").replacingOccurrences(of: ",", with: ".")
             .trimmingCharacters(in: .whitespaces)
         guard let price = Double(cleaned) else { return nil }
+        let numbers = r.salesTitle.replacingOccurrences(of: #"(?<=\d)[.,](?=\d{3})"#, with: "", options: .regularExpression)
+            .matches(of: /\d+/).compactMap { Int($0.output) }
+        let days = r.deliveryTitle.firstMatch(of: /:\s*(\d+)\s*day/).flatMap { Int($0.output.1) }
         return Listing(condition: r.cond, language: r.lang, price: price,
-                       quantity: Int(r.qty) ?? 1, seller: r.seller, country: r.loc)
+                       quantity: Int(r.qty) ?? 1, seller: r.seller, country: r.loc,
+                       sellerRating: r.rating, sales: numbers.first, availableItems: numbers.dropFirst().first,
+                       deliveryDays: days, hasPhoto: r.photo, comment: r.comment, flags: Set(r.flags))
     }
 
     private static let loadMoreJS = """
@@ -152,13 +168,22 @@ final class ListingsLoader: NSObject, WKNavigationDelegate {
     private static let extractJS = """
     (function(){
       const t=e=>e&&(e.getAttribute('data-bs-original-title')||e.getAttribute('title'));
+      const terms={reverse:['reverse'],first:['first edition','1st edition','erstauflage'],signed:['signed','signiert'],altered:['altered','verändert'],foil:['foil']};
+      const flagsOf=r=>{const labels=[...r.querySelectorAll('.product-attributes [aria-label],.product-attributes [data-bs-original-title],.product-attributes [title]')].filter(e=>!e.closest('.product-comments')).map(e=>(e.getAttribute('aria-label')||e.getAttribute('data-bs-original-title')||e.getAttribute('title')||'').toLowerCase().replace(/<[^>]*>/g,''));
+        return Object.keys(terms).filter(k=>labels.some(l=>terms[k].some(t=>l.includes(t))));};
       const rows=[...document.querySelectorAll('.article-row')].map(r=>({
         cond:r.querySelector('.article-condition .badge')?.textContent.trim()||'',
         lang:t(r.querySelector('.product-attributes .icon'))||'',
         price:r.querySelector('.price-container .color-primary')?.textContent.trim()||'',
         qty:r.querySelector('.item-count')?.textContent.trim()||'1',
         seller:r.querySelector('.seller-name a')?.textContent.trim()||'',
-        loc:(t(r.querySelector('.seller-name .icon'))||'').replace('Item location: ','')
+        loc:(t(r.querySelector('.seller-name .icon'))||'').replace('Item location: ',''),
+        rating:((r.querySelector('[class*="fonticon-seller-rating-"]')?.className||'').match(/fonticon-seller-rating-([a-z]+)/)||[])[1]||'',
+        salesTitle:t(r.querySelector('.sell-count'))||'',
+        deliveryTitle:t(r.querySelector('.fonticon-calendar'))||'',
+        photo:!!r.querySelector('.fonticon-camera'),
+        comment:(r.querySelector('.product-comments .text-truncate')||r.querySelector('.product-comments'))?.textContent.trim().slice(0,200)||'',
+        flags:flagsOf(r)
       }));
       const challenge=!!document.querySelector('script[src*="challenge-platform"],#challenge-error-text,.cf-turnstile,#cf-chl-widget,#challenge-form')
         || /just a moment|even geduld|un instant|einen moment|un momento/i.test(document.title);

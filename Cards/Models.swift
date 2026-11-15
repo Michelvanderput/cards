@@ -21,6 +21,14 @@ struct CardItem: Identifiable, Codable, Hashable {
     /// Hoofdprijs: de Cardmarket-trendprijs (EUR).
     var mainPrice: Double? { normal.trend ?? holo.trend ?? normal.avg ?? holo.avg }
 
+    /// Prijsverandering: trend t.o.v. het 7-daags gemiddelde (positief = gestegen).
+    var weekChange: Double? {
+        for set in [normal, holo] {
+            if let t = set.trend, let a = set.avg7, a > 0 { return t / a - 1 }
+        }
+        return nil
+    }
+
     var cardmarketURL: URL {
         URL(string: "https://www.cardmarket.com/en/Pokemon/Products?idProduct=\(id)")!
     }

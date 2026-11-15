@@ -12,6 +12,31 @@ struct CollectionEntry: Identifiable, Codable, Hashable {
     var myPrice: Double?        // jouw eigen waardering per kaart
     var note: String = ""
     var added = Date()
+    var forSale: Bool = false
+    var askingPrice: Double?    // je vraagprijs per kaart
+
+    init(productID: Int, name: String, condition: Condition = .nm, quantity: Int = 1, paidPrice: Double? = nil,
+         myPrice: Double? = nil, note: String = "", forSale: Bool = false, askingPrice: Double? = nil) {
+        self.productID = productID; self.name = name; self.condition = condition; self.quantity = quantity
+        self.paidPrice = paidPrice; self.myPrice = myPrice; self.note = note
+        self.forSale = forSale; self.askingPrice = askingPrice
+    }
+
+    // Eigen decodering zodat bestanden van vóór "te koop" gewoon blijven werken.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        productID = try c.decode(Int.self, forKey: .productID)
+        name = try c.decode(String.self, forKey: .name)
+        condition = try c.decodeIfPresent(Condition.self, forKey: .condition) ?? .nm
+        quantity = try c.decodeIfPresent(Int.self, forKey: .quantity) ?? 1
+        paidPrice = try c.decodeIfPresent(Double.self, forKey: .paidPrice)
+        myPrice = try c.decodeIfPresent(Double.self, forKey: .myPrice)
+        note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
+        added = try c.decodeIfPresent(Date.self, forKey: .added) ?? Date()
+        forSale = try c.decodeIfPresent(Bool.self, forKey: .forSale) ?? false
+        askingPrice = try c.decodeIfPresent(Double.self, forKey: .askingPrice)
+    }
 }
 
 @MainActor

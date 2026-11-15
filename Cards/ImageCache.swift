@@ -66,9 +66,19 @@ actor ImageStore {
         return result === Self.notFound ? nil : result
     }
 
-    /// Haalt plaatjes alvast op (bijvoorbeeld voor een hele binderpagina).
-    func prefetch(_ urls: [URL]) async {
-        for url in urls { _ = await image(url) }
+    /// Haalt plaatjes alvast op (6 tegelijk) en meldt de voortgang. Stopt als de taak geannuleerd wordt.
+    func prefetch(_ urls: [URL], progress: @Sendable (Int) async -> Void) async {
+        var done = 0
+        var index = 0
+        while index < urls.count, !Task.isCancelled {
+            let batch = urls[index..<min(index + 6, urls.count)]
+            await withTaskGroup(of: Void.self) { group in
+                for url in batch { group.addTask { _ = await self.image(url) } }
+            }
+            index += batch.count
+            done += batch.count
+            await progress(done)
+        }
     }
 
     func diskBytes() -> Int64 {

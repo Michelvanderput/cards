@@ -21,6 +21,8 @@ struct CardsApp: App {
     @State private var market = MarketStore()
     @State private var collection = CollectionStore()
     @State private var binders = BinderStore()
+    @State private var appSettings = AppSettings()
+    @State private var session = CardmarketSession()
     @AppStorage("autoCheck") private var autoCheck = true
     @AppStorage("languageFilter") private var languageFilter: LanguageFilter = .all
     @Environment(\.scenePhase) private var scenePhase
@@ -42,6 +44,8 @@ struct CardsApp: App {
                 .environment(market)
                 .environment(collection)
                 .environment(binders)
+                .environment(appSettings)
+                .environment(session)
                 .task {
                     await refreshAll()
                     #if os(macOS)
@@ -74,8 +78,10 @@ struct CardsApp: App {
         #if os(macOS)
         Settings {
             SettingsView()
-                .environment(catalog)
-                .frame(width: 480, height: 460)
+                .environment(catalog).environment(watch).environment(history).environment(checker)
+                .environment(market).environment(collection).environment(binders)
+                .environment(appSettings).environment(session)
+                .frame(width: 540, height: 640)
         }
         #endif
     }
@@ -85,6 +91,7 @@ struct CardsApp: App {
     private func refreshPrices() async {
         await catalog.start()
         for e in watch.entries { history.record(id: e.id, price: catalog.byID[e.id]?.mainPrice) }
+        history.record(id: HistoryStore.portfolioID, price: collection.entries.isEmpty ? nil : collection.totalValue(catalog: catalog))
         await watch.evaluate(catalog: catalog)
     }
 
@@ -93,7 +100,7 @@ struct CardsApp: App {
     private func refreshAll() async {
         await refreshPrices()
         if autoCheck {
-            await checker.run(watch: watch, language: languageFilter, market: market, interactive: false, minimumAge: 15 * 60)
+            await checker.run(watch: watch, language: languageFilter, market: market, settings: appSettings, catalog: catalog, interactive: false, minimumAge: 15 * 60)
         }
     }
 

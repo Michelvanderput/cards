@@ -19,9 +19,12 @@ struct WatchEntry: Identifiable, Codable, Hashable {
     var minCondition: Condition?
     var lastCheapest: Double?
     var lastChecked: Date?
+    /// Meld ook koopjes (dealscore 80+) op deze kaart, los van een doelprijs.
+    var dealAlert: Bool?
+    var lastDealSignature: String?
 
     var alertSummary: String? {
-        guard let target else { return nil }
+        guard let target else { return dealAlert == true ? "Meld koopjes" : nil }
         if let minCondition { return "\(minCondition.rawValue)+ onder \(euro(target))" }
         return "Trend \(direction.label.lowercased()) \(euro(target))"
     }
@@ -34,7 +37,9 @@ final class WatchStore {
 
     init() { load() }
 
-    var conditionEntries: [WatchEntry] { entries.filter { $0.minCondition != nil && $0.target != nil } }
+    var conditionEntries: [WatchEntry] {
+        entries.filter { ($0.minCondition != nil && $0.target != nil) || $0.dealAlert == true }
+    }
 
     func isWatching(_ id: Int) -> Bool { entries.contains { $0.id == id } }
     func entry(_ id: Int) -> WatchEntry? { entries.first { $0.id == id } }
@@ -50,16 +55,18 @@ final class WatchStore {
         save()
     }
 
-    func setAlert(_ id: Int, target: Double?, direction: AlertDirection, minCondition: Condition?) {
+    func setAlert(_ id: Int, target: Double?, direction: AlertDirection, minCondition: Condition?, dealAlert: Bool = false) {
         guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[i].target = target
         entries[i].direction = minCondition == nil ? direction : .below
         entries[i].minCondition = minCondition
+        entries[i].dealAlert = dealAlert
+        entries[i].lastDealSignature = nil
         entries[i].alerted = false
         entries[i].lastCheapest = nil
         entries[i].lastChecked = nil
         save()
-        if target != nil { Task { await Self.requestPermission() } }
+        if target != nil || dealAlert { Task { await Self.requestPermission() } }
     }
 
     /// Controleert de trend-alerts (alle staten) tegen de nieuwste prijsbestanden.
@@ -97,6 +104,14 @@ final class WatchStore {
         } else if !met && entries[i].alerted {
             entries[i].alerted = false
         }
+    }
+
+    /// Meldt een koopje (eenmalig per aanbieding).
+    func applyDeal(id: Int, signature: String, body: String) async {
+        guard let i = entries.firstIndex(where: { $0.id == id }), entries[i].lastDealSignature != signature else { return }
+        entries[i].lastDealSignature = signature
+        save()
+        await Self.notify(title: "Koopje: \(entries[i].name)", body: body)
     }
 
     // MARK: - Notificaties

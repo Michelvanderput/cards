@@ -34,3 +34,24 @@ targets:
         DEVELOPMENT_TEAM: 85CDCL9Q43
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  CardsTests:
+    type: bundle.unit-test
+    supportedDestinations: [iOS, macOS]
+    sources: [Tests]
+    dependencies:
+      - target: Cards
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: nl.michelvanderput.cardstests
+        TEST_HOST[sdk=macosx*]: $(BUILT_PRODUCTS_DIR)/Cards.app/Contents/MacOS/Cards
+        BUNDLE_LOADER[sdk=macosx*]: $(TEST_HOST)
+        TEST_HOST[sdk=iphone*]: $(BUILT_PRODUCTS_DIR)/Cards.app/Cards
+        BUNDLE_LOADER[sdk=iphone*]: $(TEST_HOST)
+schemes:
+  Cards:
+    build:
+      targets:
+        Cards: all
+    test:
+      targets: [CardsTests]

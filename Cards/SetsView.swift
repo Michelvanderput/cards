@@ -70,16 +70,30 @@ struct SetsView: View {
     }
 }
 
+enum Ownership: String, CaseIterable, Identifiable {
+    case all = "Alle kaarten", owned = "In bezit", missing = "Ontbreekt"
+    var id: String { rawValue }
+}
+
 struct SetDetailView: View {
     let set: SetInfo
     @Environment(CatalogStore.self) private var catalog
     @Environment(CollectionStore.self) private var collection
     @State private var query = ""
     @State private var sort: SearchSort = .priceDesc
+    @State private var ownership: Ownership = .all
+    @State private var downloaded: Int?
+    @State private var downloadTask: Task<Void, Never>?
     @AppStorage("gridMode") private var gridMode = true
 
     private var items: [CardItem] {
         var list = catalog.itemsBySet[set.id] ?? []
+        let owned = Set(collection.entries.map(\.productID))
+        switch ownership {
+        case .all: break
+        case .owned: list = list.filter { owned.contains($0.id) }
+        case .missing: list = list.filter { !owned.contains($0.id) }
+        }
         if !query.isEmpty { list = list.filter { $0.name.localizedCaseInsensitiveContains(query) } }
         switch sort {
         case .priceDesc: list.sort { ($0.mainPrice ?? -1) > ($1.mainPrice ?? -1) }
@@ -110,9 +124,34 @@ struct SetDetailView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { gridMode.toggle() } label: { Label("Weergave", systemImage: gridMode ? "list.bullet" : "square.grid.2x2") }
                 Menu {
+                    Picker("Tonen", selection: $ownership) { ForEach(Ownership.allCases) { Text($0.rawValue).tag($0) } }
                     Picker("Sorteren", selection: $sort) { ForEach(SearchSort.allCases) { Text($0.rawValue).tag($0) } }
-                } label: { Label("Sorteren", systemImage: "arrow.up.arrow.down") }
+                } label: { Label("Opties", systemImage: ownership == .all ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill") }
+                Button(action: toggleDownload) {
+                    if let downloaded, downloadTask != nil {
+                        Label("\(downloaded)/\(offlineURLs.count)", systemImage: "stop.circle")
+                    } else {
+                        Label("Offline opslaan", systemImage: "arrow.down.circle")
+                    }
+                }
             }
+        }
+    }
+
+    /// Kleine en grote plaatjes van de hele set.
+    private var offlineURLs: [URL] {
+        (catalog.itemsBySet[set.id] ?? []).flatMap { item in
+            [catalog.imageURL(for: item, quality: .low), catalog.imageURL(for: item, quality: .high)].compactMap { $0 }
+        }
+    }
+
+    private func toggleDownload() {
+        if let task = downloadTask { task.cancel(); downloadTask = nil; return }
+        let urls = offlineURLs
+        downloaded = 0
+        downloadTask = Task {
+            await ImageStore.shared.prefetch(urls) { done in await MainActor.run { downloaded = done } }
+            await MainActor.run { downloadTask = nil }
         }
     }
 
@@ -123,7 +162,8 @@ struct SetDetailView: View {
                 Text(set.releaseDate.map { "\($0.formatted(.dateTime.day().month(.abbreviated).year())) · \(set.count) kaarten" } ?? "\(set.count) kaarten")
                     .font(.subheadline.weight(.medium))
                 ProgressView(value: Double(owned), total: Double(max(set.count, 1))).tint(Theme.accent)
-                Text("\(owned) in je collectie").font(.caption).foregroundStyle(.secondary)
+                Text(downloadTask != nil ? "Plaatjes downloaden voor offline gebruik…" : "\(owned) in je collectie")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding()

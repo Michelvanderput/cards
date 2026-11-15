@@ -8,6 +8,7 @@ struct AlertSheet: View {
     @State private var direction: AlertDirection = .below
     @State private var condition: Condition? = nil
     @State private var target: Double?
+    @State private var dealAlert = false
 
     var body: some View {
         NavigationStack {
@@ -33,6 +34,11 @@ struct AlertSheet: View {
                     }
                 }
                 Section {
+                    Toggle("Meld koopjes (dealscore 80+)", isOn: $dealAlert)
+                } footer: {
+                    Text("De app beoordeelt dan elke keer dat hij de aanbiedingen controleert of er een uitzonderlijk goede aanbieding is, ook zonder doelprijs.")
+                }
+                Section {
                     Text("Nu (trend, alle staten): \(euro(item.mainPrice))").foregroundStyle(.secondary)
                     if condition != nil {
                         Text("Alerts per staat kijken naar de goedkoopste aanbieding op Cardmarket. Dat gebeurt zolang de app open staat, of als je Watchlist controleren kiest.")
@@ -45,13 +51,13 @@ struct AlertSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Annuleer") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Bewaar") {
-                        watch.setAlert(item.id, target: target, direction: direction, minCondition: condition)
+                        watch.setAlert(item.id, target: target, direction: direction, minCondition: condition, dealAlert: dealAlert)
                         dismiss()
                     }
                 }
             }
             .onAppear {
-                if let e = watch.entry(item.id) { direction = e.direction; target = e.target; condition = e.minCondition }
+                if let e = watch.entry(item.id) { direction = e.direction; target = e.target; condition = e.minCondition; dealAlert = e.dealAlert ?? false }
             }
         }
         #if os(macOS)

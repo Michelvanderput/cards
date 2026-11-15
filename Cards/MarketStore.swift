@@ -24,8 +24,10 @@ final class MarketStore {
     private(set) var info: [Int: MarketInfo] = [:]
     private(set) var usdToEur: Double?
     private var fxFetched: Date?
+    private let storage: URL?
 
-    init() { load() }
+    /// - Parameter storage: map voor het opslagbestand (alleen voor tests); standaard de app-map.
+    init(storage: URL? = nil) { self.storage = storage; load() }
 
     func tcgplayerEUR(_ id: Int) -> Double? {
         guard let usd = info[id]?.tcgplayerUSD, let fx = usdToEur else { return nil }
@@ -86,7 +88,7 @@ final class MarketStore {
     // MARK: - Opslag
 
     private var fileURL: URL {
-        let dir = URL.applicationSupportDirectory.appending(path: "Cards", directoryHint: .isDirectory)
+        let dir = storage ?? URL.applicationSupportDirectory.appending(path: "Cards", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appending(path: "market.json")
     }

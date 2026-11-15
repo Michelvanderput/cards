@@ -5,8 +5,8 @@ enum Deal {
 
     var label: String {
         switch self {
-        case .great: "Goede deal"
-        case .good: "Gunstig"
+        case .great: "Koopje"
+        case .good: "Goede deal"
         case .fair: "Marktprijs"
         case .expensive: "Duur"
         }

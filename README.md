@@ -27,6 +27,14 @@ python3 Scripts/make_cardmap.py cards2.jsonl set_names.json products_singles_6.j
 - **Binders:** eigen binders met pagina's van vakjes, kaarten slepen om te wisselen
 - **Watchlist** met prijsalerts, prijsvergelijking en dealbeoordeling
 
+## Deals, verkopen en account
+- **Dealscore (0–100)** per aanbieding: prijs incl. geschatte verzending tegenover de mediaan van gelijke staat én variant, verkoper, foto, levertijd, TCGplayer-controle. Beste deals bovenaan.
+- **Verkoop:** kaarten in je collectie markeren als te koop met vraagprijs; beoordeling (te duur / marktconform / scherp), advies en netto na commissie; Marktcheck.
+- **Slim bundelen:** verkopers met meerdere kaarten van je watchlist, met geschatte verzendbesparing.
+- **Koopjes-alerts**, winnaars/verliezers, waardeverloop, CSV-export, privacymodus, sets offline opslaan.
+- **Cardmarket-account:** inloggen in een webweergave; de app ziet je wachtwoord niet. *Mijn aanbod beoordelen* is experimenteel.
+- Tests: `xcodebuild -scheme Cards -destination 'platform=macOS' test`
+
 ## Alerts
 - **Trend-alert:** op de Cardmarket-trendprijs (alle staten). Wordt gecontroleerd bij het starten (en op iOS best effort op de achtergrond).
 - **Alert per staat** (NM/EX/GD/LP of beter): kijkt naar de goedkoopste aanbieding op de Cardmarket-pagina via een webweergave. Dat werkt alleen met de app open (bij het starten, op de Mac elke 30 min, of via *Watchlist controleren*). Vraagt Cardmarket een Cloudflare-controle, dan krijg je een melding om die zelf aan te tikken.

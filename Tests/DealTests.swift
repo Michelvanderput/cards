@@ -1,0 +1,113 @@
+import XCTest
+@testable import Cards
+
+@MainActor
+final class DealTests: XCTestCase {
+    private func settings() -> AppSettings {
+        let suite = UserDefaults(suiteName: "cards-tests-\(UUID().uuidString)")!
+        let s = AppSettings(defaults: suite)
+        s.homeCountry = "Netherlands"
+        s.includeShipping = true
+        return s
+    }
+
+    private func listing(_ price: Double, cond: String = "NM", country: String = "Netherlands",
+                         rating: String = "good", sales: Int? = 100, flags: Set<String> = [], photo: Bool = false) -> Listing {
+        Listing(condition: cond, language: "English", price: price, quantity: 1, seller: "s\(price)", country: country,
+                sellerRating: rating, sales: sales, availableItems: nil, deliveryDays: 3, hasPhoto: photo, comment: "", flags: flags)
+    }
+
+    func testCheapestScoresHigherThanExpensive() {
+        let items = (10...19).map { listing(Double($0)) }
+        let scores = DealEngine.analyze(items, settings: settings(), tcgplayerEUR: nil, trend: nil)
+        let cheap = scores[items[0].id]!, dear = scores[items[9].id]!
+        XCTAssertGreaterThan(cheap.value, dear.value)
+        XCTAssertEqual(cheap.level, .great)
+        XCTAssertTrue([Deal.fair, .expensive, .good].contains(dear.level))
+    }
+
+    func testShippingUsesTrackedAboveThreshold() {
+        let s = settings()
+        XCTAssertEqual(s.shipping(from: "Netherlands", price: 20), s.shipDomestic)
+        XCTAssertEqual(s.shipping(from: "Netherlands", price: 25.01), s.shipDomesticTracked)
+        XCTAssertEqual(s.shipping(from: "Germany", price: 10), s.shipEU)
+        XCTAssertEqual(s.shipping(from: "Japan", price: 10), s.shipWorld)
+        s.includeShipping = false
+        XCTAssertEqual(s.shipping(from: "Germany", price: 10), 0)
+    }
+
+    func testForeignListingCostsMoreInTotal() {
+        let items = [10.0, 10, 10, 10, 10].enumerated().map { i, p in listing(p, country: i == 0 ? "Japan" : "Netherlands") }
+        let scores = DealEngine.analyze(items, settings: settings(), tcgplayerEUR: nil, trend: nil)
+        XCTAssertGreaterThan(scores[items[0].id]!.total, scores[items[1].id]!.total)
+        XCTAssertLessThan(scores[items[0].id]!.value, scores[items[1].id]!.value)
+    }
+
+    func testVariantsAreComparedSeparately() {
+        // Gewone kaarten rond €10; gesigneerde rond €100. De gesigneerde mag niet als "duur" zakken.
+        var items = (0..<6).map { listing(10 + Double($0) * 0.5) }
+        let signed = (0..<5).map { listing(100 + Double($0), flags: ["signed"]) }
+        items += signed
+        let scores = DealEngine.analyze(items, settings: settings(), tcgplayerEUR: nil, trend: nil)
+        let cheapSigned = scores[signed[0].id]!
+        XCTAssertGreaterThanOrEqual(cheapSigned.value, 50, "gesigneerde kaart moet met gesigneerde kaarten vergeleken worden")
+    }
+
+    func testAlteredIsPenalised() {
+        let base = (0..<5).map { _ in listing(10) }
+        let altered = listing(10, flags: ["altered"])
+        let scores = DealEngine.analyze(base + [altered], settings: settings(), tcgplayerEUR: nil, trend: nil)
+        XCTAssertLessThan(scores[altered.id]!.value, scores[base[0].id]!.value)
+    }
+
+    func testTCGplayerCrossCheckRewardsLowPrice() {
+        let items = (0..<5).map { listing(20 + Double($0)) }
+        let without = DealEngine.analyze(items, settings: settings(), tcgplayerEUR: nil, trend: nil)[items[0].id]!.value
+        let with = DealEngine.analyze(items, settings: settings(), tcgplayerEUR: 40, trend: nil)[items[0].id]!.value
+        XCTAssertGreaterThan(with, without)
+    }
+
+    func testPercentile() {
+        XCTAssertEqual(DealAnalyzer.percentile([1, 2, 3, 4, 5], 0.5), 3)
+        XCTAssertEqual(DealAnalyzer.percentile([10, 20], 0.5), 15)
+        XCTAssertEqual(DealAnalyzer.percentile([], 0.5), 0)
+    }
+
+    func testSaleAdvisorVerdicts() {
+        let dir = URL.temporaryDirectory.appending(path: "cards-test-\(UUID().uuidString)")
+        let market = MarketStore(storage: dir)
+        let prices = (10...29).map { Double($0) }   // mediaan ≈ 19,5, p25 ≈ 14,75, min 10
+        market.recordListings(id: 1, minCondition: .nm, listings: prices.map { listing($0) })
+        let s = settings()
+
+        func verdict(_ ask: Double?) -> SaleVerdict {
+            SaleAdvisor.review(CollectionEntry(productID: 1, name: "x", condition: .nm, forSale: true, askingPrice: ask),
+                               market: market, settings: s).verdict
+        }
+        XCTAssertEqual(verdict(30), .tooHigh)
+        XCTAssertEqual(verdict(17), .fair)
+        XCTAssertEqual(verdict(11), .competitive)
+        XCTAssertEqual(verdict(5), .belowMarket)
+        XCTAssertEqual(verdict(nil), .noData)
+
+        let unknown = SaleAdvisor.review(CollectionEntry(productID: 2, name: "y", condition: .nm, forSale: true, askingPrice: 10),
+                                         market: market, settings: s)
+        XCTAssertEqual(unknown.verdict, .noData)
+        XCTAssertEqual(unknown.net ?? 0, 9.5, accuracy: 0.001)   // 5% commissie
+    }
+
+    func testCollectionEntryDecodesOldFormat() throws {
+        let old = #"{"id":"7B3F2B0A-1111-4222-8333-444455556666","productID":5,"name":"Old","condition":"EX","quantity":2,"note":"","added":0}"#
+        let e = try JSONDecoder().decode(CollectionEntry.self, from: Data(old.utf8))
+        XCTAssertEqual(e.productID, 5)
+        XCTAssertFalse(e.forSale)
+        XCTAssertNil(e.askingPrice)
+    }
+
+    func testBinderStoreLogic() {
+        var b = Binder(name: "t", colorIndex: 0, columns: 3, rows: 3, pages: 2)
+        XCTAssertEqual(b.slots.count, 18)
+        b.slots[0] = 1
+        XCTAssertEqual(b.filled, 1)
+    }
+}
